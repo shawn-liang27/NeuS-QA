@@ -65,13 +65,13 @@ Expected Output (only output the following JSON structure — nothing else):
     }
 
 
-def identify_target(question, candidates, specification, conversation_history):
+def identify_target(question, candidates, specification, conversation_history, save_dir):
     # Read the conversation history
     history_path = conversation_history
     with open(history_path, "r") as f:
         history = json.load(f)
 
-    llm = LLM(history=history)
+    llm = LLM(history=history, save_dir=save_dir)
 
     # Get target identification results
     result = process_datapoint(llm, question, candidates, specification)

@@ -68,7 +68,7 @@ class VLLMClientMultiprocessing(VLLMClient):
         api_base,
         max_workers=NUM_WORKERS,
     ):
-        super().__init__(model, api_base)
+        super().__init__(model=model, api_base=api_base)
         self.executor = ThreadPoolExecutor(max_workers=max_workers)
 
     def multiple_choice_batch(self, batch_args):

@@ -1,0 +1,81 @@
+[
+    {
+        "paths": {
+            "video_path": "/scratch/pioneer/users/sgl57/LongVideoBench/burn-subtitles/mH9LdC7IFH8.mp4"
+        },
+        "question": "What happens when wine shows up on the screen before the vineyards showed up on the screen?",
+        "candidates": [
+            "A close up of the wine was shown",
+            "The wine was trashed",
+            "The wine was replaced with soda",
+            "The man in the blue shirt was talking"
+        ],
+        "puls": {
+            "proposition": [
+                "wine_shows_up_on_the_screen",
+                "vineyards_show_up_on_the_screen"
+            ],
+            "specification": "\"wine_shows_up_on_the_screen\" U \"vineyards_show_up_on_the_screen\"",
+            "conversation_history": "/home/sgl57/ECSE_gxd234_1/Neus_VLM/NeuS-QA/experiment_result/nsvs_qa_20251125_231446/llm_conversation_history/conversation_history_target_20251125_231450.json"
+        },
+        "target_identification": {
+            "frame_window": "[start_time - 5, end_time]",
+            "explanation": "The question asks about events when the specification occurs, which involves wine showing up before vineyards. We must include the initial event of 'wine_shows_up_on_the_screen' and capture the 'before' context by starting 5 seconds earlier to understand actions directly leading up to the specification.",
+            "conversation_history": "/home/sgl57/ECSE_gxd234_1/Neus_VLM/NeuS-QA/experiment_result/nsvs_qa_20251125_231446/llm_conversation_history/conversation_history_target_target_20251125_231451.json"
+        },
+        "metadata": {
+            "fps": 25.0,
+            "frame_count": 8051
+        },
+        "nsvs": {
+            "output": [
+                825,
+                2325
+            ],
+            "indices": [
+                [
+                    17,
+                    18,
+                    19,
+                    22,
+                    29,
+                    30,
+                    31,
+                    44,
+                    72
+                ],
+                [
+                    1,
+                    11,
+                    12,
+                    16,
+                    17,
+                    18,
+                    19,
+                    20,
+                    22,
+                    23,
+                    24,
+                    25,
+                    27,
+                    28,
+                    29,
+                    30,
+                    31,
+                    44,
+                    50,
+                    63,
+                    72,
+                    75,
+                    83,
+                    86,
+                    95
+                ]
+            ]
+        },
+        "frames_of_interest": [
+            700,
+            2325
+        ]
+    }
+]

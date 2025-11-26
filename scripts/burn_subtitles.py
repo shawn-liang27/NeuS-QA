@@ -4,7 +4,8 @@ import subprocess
 from datetime import datetime
 from tqdm import tqdm
 from multiprocessing import Pool, cpu_count
-
+import argparse
+from functools import partial
 
 def time_to_seconds(time_str):
     time_str = time_str.replace(" ", "")
@@ -20,7 +21,7 @@ def seconds_to_srt_format(seconds):
     return f"{hours:02d}:{minutes:02d}:{secs:02d},{ms:03d}"
 
 
-def burn_subtitles_on_video(video_path, subtitles_json_path, starting_timestamp, save_path,
+def burn_subtitles_on_video(video_path, subtitles_json_path, starting_timestamp, save_path, data_dir,
                              font_size=24, font="Arial-Bold", color="white"):
     with open(subtitles_json_path, "r") as f:
         subtitles = json.load(f)
@@ -36,7 +37,7 @@ def burn_subtitles_on_video(video_path, subtitles_json_path, starting_timestamp,
             bad = True
 
     if bad:
-        with open("err.txt", "a") as error_log:
+        with open(f"{data_dir}/err.txt", "a") as error_log:
             error_log.write(f"Bad subtitles detected for video: {video_path}\n")
 
     try:
@@ -72,11 +73,11 @@ def burn_subtitles_on_video(video_path, subtitles_json_path, starting_timestamp,
     ]
 
     try:
-        subprocess.run(cmd, check=True, capture_output=True)
+        subprocess.run(cmd, check=True, capture_output=True, text=True)
     except subprocess.CalledProcessError as e:
-        print(f"FFmpeg error for {video_path}: {e}")
-        with open("err.txt", "a") as error_log:
-            error_log.write(f"FFmpeg error for {video_path}: {e}\n")
+        error_msg = f"FFmpeg error for {video_path}:\nSTDOUT: {e.stdout}\nSTDERR: {e.stderr}"
+        with open(f"{data_dir}/err.txt", "a") as error_log:
+            error_log.write(error_msg + "\n")
     finally:
         try:
             os.remove(temp_srt_path)
@@ -84,18 +85,18 @@ def burn_subtitles_on_video(video_path, subtitles_json_path, starting_timestamp,
             pass
 
 
-def process_entry(entry):
+def process_entry(entry, data_dir, out_dir):
     video_id = entry["video_id"]
-    video_path = f"datasets/longvideobench/LongVideoBench/videos/{video_id}.mp4"
-    subtitles_json_path = f"datasets/longvideobench/LongVideoBench/subtitles/{video_id}_en.json"
-    save_path = f"datasets/longvideobench/burn-subtitles/{video_id}.mp4"
+    video_path = f"{data_dir}/videos/{video_id}.mp4"
+    subtitles_json_path = f"{data_dir}/subtitles/{video_id}_en.json"
+    save_path = f"{out_dir}/{video_id}.mp4"
 
     # Skip if already processed
     if os.path.exists(save_path):
         return
 
     if not os.path.exists(video_path) or not os.path.exists(subtitles_json_path):
-        with open("err.txt", "a") as error_log:
+        with open(f"{data_dir}/err.txt", "a") as error_log:
             if not os.path.exists(video_path):
                 error_log.write(f"Video file not found: {video_path}\n")
             if not os.path.exists(subtitles_json_path):
@@ -105,25 +106,30 @@ def process_entry(entry):
     try:
         starting_timestamp = entry["starting_timestamp_for_subtitles"]
     except KeyError as e:
-        with open("err.txt", "a") as error_log:
+        with open("/scratch/pioneer/users/sgl57/LongVideoBench/err.txt", "a") as error_log:
             error_log.write(f"KeyError: {e} for video_id: {video_id}\n")
         return
 
     burn_subtitles_on_video(video_path, subtitles_json_path, starting_timestamp, save_path)
 
 
-def main():
-    with open("datasets/longvideobench/LongVideoBench/lvb_val.json", "r") as f:
+def main(data_dir, out_dir):
+    with open(f"{data_dir}/lvb_val.json", "r") as f:
         data = json.load(f)
 
-    os.makedirs("datasets/longvideobench/burn-subtitles", exist_ok=True)
-
+    os.makedirs(out_dir, exist_ok=True)
+    print(f"Total Videos: {len(data)}")
     num_workers = min(10, cpu_count())
     print(f"Using {num_workers} parallel workers.")
+    partial_func = partial(process_entry, data_dir=data_dir, out_dir=out_dir)
     with Pool(processes=num_workers) as pool:
-        list(tqdm(pool.imap_unordered(process_entry, data), total=len(data)))
+        list(tqdm(pool.imap_unordered(partial_func, data), total=len(data)))
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--data_dir")
+    parser.add_argument("--out_dir")
+    args = parser.parse_args()
+    main(data_dir=args.data_dir, out_dir=args.out_dir)
 

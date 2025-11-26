@@ -45,11 +45,11 @@ def process_specification(specification, propositions):
 
     return new_propositions, specification
 
-def PULS(prompt, openai_key=None):
+def PULS(prompt, save_dir, openai_key=None):
     if openai_key:
         os.environ["OPENAI_API_KEY"] = openai_key
 
-    llm = LLM()
+    llm = LLM(save_dir=save_dir)
 
     full_prompt = find_prompt(prompt)
     llm_output = llm.prompt(full_prompt)
