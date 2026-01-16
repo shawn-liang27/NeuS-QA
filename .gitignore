@@ -7,7 +7,7 @@ junk/
 datasets/
 logs/
 vendors/
-
+experiment_results/
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -139,6 +139,7 @@ celerybeat.pid
 
 # Environments
 .env
+.ENV
 .venv
 env/
 venv/

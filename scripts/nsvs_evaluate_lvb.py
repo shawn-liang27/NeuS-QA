@@ -6,16 +6,19 @@ from nsvqa.datamanager.custom import *
 from nsvqa.nsvs.vlm.obj import *
 from nsvqa.nsvs.nsvs import *
 from nsvqa.puls.puls import *
-from nsvqa.vqa.vqa import *
+from nsvqa.vqa.vqa import vqa
+from nsvqa.vqa.lmm_vqa import lmm_eval_vqa
 
 import json
 import os
 import datetime
 import argparse
+import logging
+
 
 def exec_puls(entry, save_dir): # Step 1
-    output = PULS(entry["question"], entry["metadata"]["video_id"], save_dir=save_dir)
-
+    output = PULS(entry["question"], entry["metadata"]["id"], save_dir=save_dir)
+    print("PULS is called")
     entry["puls"] = {}
     entry["puls"]["proposition"] = output["proposition"]
     entry["puls"]["specification"] = output["specification"]
@@ -27,7 +30,7 @@ def exec_target_identification(entry, save_dir): # Step 2
         entry["candidates"],
         entry["puls"]["specification"],
         entry["puls"]["conversation_history"],
-        entry["metadata"]["video_id"],
+        entry["metadata"]["id"],
         save_dir
     )
 
@@ -84,25 +87,9 @@ def exec_merge(entry): # Step 4
     else:
         entry["frames_of_interest"] = [-1]
 
-def run_nsvqa(output_dir, llm_convo_dir, current_split, total_splits, vlm_config, video_path):
-    # loader = LongVideoBench()
-    loader = Custom(
-        raw_data=[
-            {
-                "video_path": video_path,
-                "question": "What happens when wine shows up on the screen before the vineyards showed up on the screen?",
-                "video_id": "mH9LdC7IFH8",
-                "answer_choices": [
-                    "A close up of the wine was shown",
-                    "The wine was trashed",
-                    "The wine was replaced with soda",
-                    "The man in the blue shirt was talking"
-                ]
-            }
-        ]
-    )
-    data = loader.load_data()
-    
+def run_nsvqa(output_dir, llm_convo_dir, current_split, total_splits, vlm_config, data_dir, data_loader):
+    data = data_loader.load_data()
+    print(f'Data Loading Complete! Data Length {len(data)}\nStarting NSVS Module')
     output = []
     starting = (len(data) * (current_split-1)) // total_splits
     ending = (len(data) * current_split) // total_splits
@@ -118,39 +105,59 @@ def run_nsvqa(output_dir, llm_convo_dir, current_split, total_splits, vlm_config
     with open(output_dir, "w") as f:
         json.dump(output, f, indent=4)
 
-def postprocess(nsvqa_dir, postprocess_dir):
-    loader = Custom(postprocess_dir=postprocess_dir)
-    loader.postprocess_data(nsvqa_dir)
+def main(args):
+    vlm_config = (args.port_number, args.vlm_model_name) # device_number, model_name
 
-def main(experiment_dir, vlm_config, example_vid_path):
-    current_split = 1 # split between GPUs
-    total_splits = 1
+    experiment_dir = args.output_dir
+    current_split = args.current_split
+
+    os.makedirs(experiment_dir, exist_ok=True)
+    os.makedirs(f'{experiment_dir}/nsvqa_output', exist_ok=True)
+    os.makedirs(f'{experiment_dir}/vqa_output', exist_ok=True)
+    os.makedirs(f'{experiment_dir}/postprocess_output', exist_ok=True)
 
     nsvqa_dir = f"{experiment_dir}/nsvqa_output/nsvqa_output_{current_split}.json"
     vqa_dir = f"{experiment_dir}/vqa_output/vqa_output_{current_split}.json"
     postprocess_dir = f"{experiment_dir}/postprocess_output/postprocess_output_{current_split}.json"
     nsvs_llm_convo_dir = f"{experiment_dir}/llm_conversation_history/"
-    
-    print(nsvqa_dir, vqa_dir, postprocess_dir)
 
-    run_nsvqa(nsvqa_dir, nsvs_llm_convo_dir, current_split, total_splits, vlm_config, example_vid_path)
-    postprocess(nsvqa_dir, postprocess_dir)
-    vqa(postprocess_dir, vqa_dir, vlm_confige, eval=True)
+    print(f'Loading Data from Data_Dir: {args.data_dir}\nBurned_Dir: {args.burned_dir}')
+
+    data_loader = LongVideoBench(dataset_path=args.data_dir, burned_path=args.burned_dir, postprocess_dir=postprocess_dir, categories=args.categories)
+
+    run_nsvqa(output_dir=nsvqa_dir, llm_convo_dir=nsvs_llm_convo_dir, current_split=args.current_split, total_splits=args.total_splits, vlm_config=vlm_config, data_dir=args.data_dir, data_loader=data_loader)
+
+    data_loader.postprocess_data(nsvqa_dir)
+    if args.use_lmm_evals:
+        lmm_eval_vqa(postprocess_dir, vqa_dir, vlm_config, max_num_frames=args.max_num_frames, eval=True, pure_vqa=args.pure_vqa)
+    else:
+        vqa(postprocess_dir, vqa_dir, vlm_config, max_num_frames=args.max_num_frames, eval=True)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--vlm_model_name")
+    parser.add_argument("--vlm_model_name", type=str)
     parser.add_argument("--port_number", type=int)
-    parser.add_argument("--output_dir")
-    parser.add_argument("--example_vid_path", help=f"burned in subtitle video: mH9LdC7IFH8.mp4")
-
+    parser.add_argument("--data_dir", type=str)
+    parser.add_argument("--burned_dir", type=str)
+    parser.add_argument("--output_dir", type=str)
+    parser.add_argument("--current_split", type=int)
+    parser.add_argument("--total_splits", type=int)
+    parser.add_argument("--use_lmm_evals", action='store_true', default = True)
+    parser.add_argument("--pure_vqa", action='store_true', default = False)
+    parser.add_argument("--max_num_frames", type=int, default = 32)
+    parser.add_argument('--categories', nargs='+', type=str)
+    
     args = parser.parse_args()
-    experiment_dir = args.output_dir
-    os.makedirs(f'{experiment_dir}/nsvqa_output', exist_ok=True)
-    os.makedirs(f'{experiment_dir}/vqa_output', exist_ok=True)
-    os.makedirs(f'{experiment_dir}/postprocess_output', exist_ok=True)
+    
+    # experiment_dir = args.output_dir
+    # os.makedirs(experiment_dir, exist_ok=True)
+    # os.makedirs(f'{experiment_dir}/nsvqa_output', exist_ok=True)
+    # os.makedirs(f'{experiment_dir}/vqa_output', exist_ok=True)
+    # os.makedirs(f'{experiment_dir}/postprocess_output', exist_ok=True)
 
-    vlm_config = (args.port_number, args.vlm_model_name) # device_number, model_name
+    # vlm_config = (args.port_number, args.vlm_model_name) # device_number, model_name
 
-    main(experiment_dir, vlm_config, args.example_vid_path)
+    # main(experiment_dir, vlm_config, args.data_dir, args.burned_dir, args.categories, args.current_split, args.total_splits)
+    
+    main(args)
 

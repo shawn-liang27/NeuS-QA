@@ -11,6 +11,10 @@ from nsvqa.utils.intersection import intersection_with_gaps
 from nsvqa.nsvs.video.video_frame import VideoFrame
 from nsvqa.nsvs.vlm.vllm_client import VLLMClient
 
+from nsvqa.nsvs.vlm.internvl import InternVL
+import logging
+
+
 
 PRINT_ALL = False
 warnings.filterwarnings("ignore")
@@ -22,12 +26,13 @@ def run_nsvs(
     specification: str,
     model: str,
     device: int,
+    vlm,
     model_type: str = "dtmc",
     num_of_frame_in_sequence = 3,
     tl_satisfaction_threshold: float = 0.6,
     detection_threshold: float = 0.5,
     vlm_detection_threshold: float = 0.349,
-    image_output_dir: str = "output"
+    image_output_dir: str = "output",
 ):
     """Find relevant frames from a video that satisfy a specification"""
 
@@ -36,8 +41,7 @@ def run_nsvs(
         print(f"Specification: {specification}\n")
         print(f"Video path: {video_path}\n")
 
-    vlm = VLLMClient(model=model, api_base=f"http://localhost:800{device}/v1")
-
+    # vlm = VLLMClient(model=model, api_base=f"http://localhost:{device}/v1")
     automaton = VideoAutomaton(include_initial_state=True)
     automaton.set_up(proposition_set=proposition)
 
@@ -62,6 +66,7 @@ def run_nsvs(
         object_of_interest = {}
 
         for prop in proposition:
+            
             detected_object = vlm.detect(
                 seq_of_frames=sequence_of_frames,
                 scene_description=prop,
@@ -89,6 +94,8 @@ def run_nsvs(
             print("\n" + "*"*50 + f" {i}/{len(frame_windows)-1} " + "*"*50)
             print("Detections:")
         frame = process_frame(sequence_of_frames, i)
+        if PRINT_ALL:
+            print("Detections Completed and Returned")
         if PRINT_ALL and False: # disabled
             os.makedirs(image_output_dir, exist_ok=True)
             frame.save_frame_img(save_path=os.path.join(image_output_dir, f"{i}"))

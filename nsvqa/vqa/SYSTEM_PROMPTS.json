@@ -1,0 +1,8 @@
+{
+  "default": "You are a helpful assistant.",
+  "qwen2_5_vl": "You are a helpful assistant.",
+  "llava_hf": "A chat between a curious user and an artificial intelligence assistant. The assistant gives helpful, detailed, and polite answers to the user's questions.",
+  "llava_1_5": "A chat between a curious user and an artificial intelligence assistant. The assistant gives helpful, detailed, and polite answers to the user's questions.",
+  "vicuna": "A chat between a curious user and an artificial intelligence assistant. The assistant gives helpful, detailed, and polite answers to the user's questions.",
+  "llama_3_2_vision": "You are a helpful assistant."
+}

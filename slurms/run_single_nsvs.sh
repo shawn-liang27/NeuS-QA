@@ -1,51 +1,47 @@
 #!/bin/bash
-#SBATCH -J neus_qa_eval
-#SBATCH --output=logs/nsvs_qa_%j/eval_%j.out
-#SBATCH --error=logs/nsvs_qa_%j/eval_%j.err
-#SBATCH -p gpu
-#SBATCH -C gpu4090
-#SBATCH -A gxd234_1
-#SBATCH -N 1
-#SBATCH --nodes=1
-#SBATCH --ntasks=1
-#SBATCH --cpus-per-task=16              
-#SBATCH --gres=gpu:1
-#SBATCH --mem=64G                        
-#SBATCH --time=04:00:00
 
-# ==============================================================================
-# Configuration
-# ==============================================================================
-# Set paths
-cd "$SLURM_SUBMIT_DIR"
 
-# set openai api key here
-export OPENAI_API_KEY=""
-export VLLM_PORT=8006
-export HF_HOME="/scratch/pioneer/users/sgl57/huggingface"
+set -euo pipefail
 
-module load CUDA/12.8.0
-module load CMake/3.27.6-GCCcore-13.2.0
-module load Boost/1.83.0-GCC-13.2.0
-module load GMP/6.3.0-GCCcore-13.2.0
-module load FFmpeg/6.0-GCCcore-13.2.0
+JOB_DIR="$HOME/NeuS-VLM/NeuS-QA"
+JOB_ID=$(date +%Y%m%d_%H%M%S)
+LOG_DIR="logs/experiments/nsvs_qa_${JOB_ID}"
+mkdir -p "$LOG_DIR"
 
-# source project env
+echo ">>> Starting Parallel Job: $JOB_ID"
+echo ">>> Logs will be saved to: $LOG_DIR"
+
+source ./activate_storm.sh
 source .venv/bin/activate
-
-# set
-source activate_storm_env.sh
 set -a
 source .ENV
 set +a
+
+
+export HF_HOME="$HOME/.cache/huggingface"
+# Use $HOME or relative paths instead of /scratch...
+DATA_DIR="/usr/homes/sgl57/.data/LongVideoBench"
+BURNED_DIR="/usr/homes/sgl57/.data/LongVideoBench/burn-subtitles/T3E_E3E_T3O_O3O_mix"
+OUT_DIR="$JOB_DIR/experiment_result/nsvs_qa_${JOB_ID}"
+mkdir -p "$OUT_DIR"
+
+
+export VLLM_PORT=35426
+
+
 # ==============================================================================
 # 1. Start vLLM Server in Background
 # ==============================================================================
 echo ">>> Starting vLLM server on port $VLLM_PORT..."
 
+if curl -s "http://localhost:$VLLM_PORT/health" > /dev/null; then
+    echo ">>> Port $VLLM_PORT is already in use"
+    return 1
+fi
+
 # launch the server script in the background using '&'
 
-./scripts/vllm_serve.sh > logs/nsvs_qa_$SLURM_JOB_ID/vllm_server_$SLURM_JOB_ID.log 2>&1 &
+./scripts/vllm_serve.sh "6" "${VLLM_PORT}" "0.2" > $LOG_DIR/vllm_server.log 2>&1 &
 
 # Capture the Process ID (PID) of the server to kill later
 SERVER_PID=$!
@@ -58,6 +54,8 @@ echo ">>> Waiting for vLLM to load model..."
 # Loop until the server responds to a health check or timeout
 MAX_RETRIES=60 # Wait up to 10-20 minutes (depending on sleep time)
 count=0
+sleep 10
+
 while true; do
     # Attempt to connect to the vLLM health endpoint
     # If curl returns HTTP 200, the server is ready.
@@ -68,7 +66,7 @@ while true; do
     
     # Also check if the process died
     if ! kill -0 $SERVER_PID 2>/dev/null; then
-        echo ">>> Error: vLLM server process died unexpectedly. Check logs/vllm_server_$SLURM_JOB_ID.log"
+        echo ">>> Error: vLLM server process died unexpectedly. Check logs/vllm_server_$JOB_ID.log"
         exit 1
     fi
 
@@ -88,10 +86,9 @@ done
 echo ">>> Starting Evaluation..."
 
 MODEL="OpenGVLab/InternVL2_5-8B"
-OUT_DIR="/home/sgl57/ECSE_gxd234_1/Neus_VLM/NeuS-QA/experiment_result"
-EXAMPLE_VID_PATH="/scratch/pioneer/users/sgl57/LongVideoBench/burn-subtitles/mH9LdC7IFH8.mp4"
+EXAMPLE_VID_PATH="/usr/homes/sgl57/NeuS-VLM/NeuS-QA/mH9LdC7IFH8.mp4"
 
-python evaluate.py --vlm_model_name "${MODEL}" --port_number "6" --output_dir "${OUT_DIR}" --example_vid_path "${EXAMPLE_VID_PATH}"
+python evaluate.py --vlm_model_name "${MODEL}" --port_number $VLLM_PORT --output_dir "${OUT_DIR}" --example_vid_path "${EXAMPLE_VID_PATH}"
 
 EXIT_CODE=$?
 

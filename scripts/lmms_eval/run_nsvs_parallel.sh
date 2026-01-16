@@ -1,0 +1,181 @@
+#!/bin/bash
+set -euo pipefail
+
+JOB_DIR="$HOME/NeuS-VLM/NeuS-QA"
+JOB_ID=$(date +%Y%m%d_%H%M%S)
+
+export HF_HOME="$HOME/.cache/huggingface"
+
+# Variables
+DATA_DIR="/usr/homes/sgl57/.data/LongVideoBench"
+BURNED_DIR="/usr/homes/sgl57/.data/LongVideoBench/burn-subtitles/T3E_E3E_T3O_O3O_mix"
+MODEL=$1 # "T3E", "E3E", "T3O", "O3O"
+MAX_TOKEN_LEN=65000
+
+# CATEGORIES=("E3E" "T3O" "O3O")
+CATEGORIES=("E3E" "T3O" "O3O")
+CAT_STR=$(IFS='_'; echo "${CATEGORIES[*]}")
+OUT_DIR="$JOB_DIR/experiment_results/nsvs/"${MODEL//\//_}"/nsvs_qa_${CAT_STR}_${JOB_ID}"
+
+USE_LMM=true
+if [[ "${USE_LMM,,}" == "true" ]]; then
+    LMM_FLAG="--use_lmm_evals"
+else
+    LMM_FLAG=""
+fi
+
+PURE_VQA=false
+if [[ "${PURE_VQA,,}" == "true" ]]; then
+    VQA_FLAG="--pure_vqa"
+else
+    VQA_FLAG=""
+fi
+
+MAX_NUM_FRAMES=$2
+
+mkdir -p "$OUT_DIR"
+
+LOG_DIR="$OUT_DIR/logs"
+mkdir -p "$LOG_DIR"
+
+echo ">>> Starting Parallel Job: $JOB_ID"
+echo ">>> Logs will be saved to: $LOG_DIR"
+
+source ./activate_storm.sh
+source .venv/bin/activate
+set -a
+source .ENV
+set +a
+# =========================================================
+# CONFIGURATION
+# =========================================================
+TOTAL_SPLITS=4  # Set this to your number of GPUs
+GPU_START=$3
+GPU_USAGE=$4
+
+# =========================================================
+# FUNCTION: Worker Logic (Runs in Parallel)
+# =========================================================
+launch_worker() {
+    local MODEL=$1
+    local SPLIT_ID=$2
+    local GPU_ID=$3
+    # Unique log files for this worker
+    local WORKER_LOG="${LOG_DIR}/worker_${SPLIT_ID}"
+    local PROCESSOR_ARGS='{"max_dynamic_patch": 6}'
+    while true; do
+        # 1. Ask the OS for a random FREE ephemeral port (High range guaranteed)
+        local PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("", 0)); print(s.getsockname()[1]); s.close()')
+        
+        echo ">>> [Worker $SPLIT_ID] Attempting to start on GPU $GPU_ID | Port $PORT"
+
+        # 2. Start vLLM Server
+        export CUDA_VISIBLE_DEVICES=$GPU_ID
+        export VLLM_PORT=$PORT
+        
+        # Overwrite the log for this attempt
+        ./scripts/vllm_serve.sh "$MODEL" "$MAX_TOKEN_LEN" "$GPU_ID" "$PORT" "$GPU_USAGE" "$PROCESSOR_ARGS"> "${WORKER_LOG}_vllm.log" 2>&1 &
+        local SERVER_PID=$!
+        
+        # 3. CRITICAL: Wait and Verify Survival
+        # vLLM takes a few seconds to import torch. We wait 5s to catch early crashes.
+        sleep 5
+
+        if ! kill -0 $SERVER_PID 2>/dev/null; then
+            echo ">>> [Worker $SPLIT_ID]  Crash detected on Port $PORT. Retrying with new port..."
+            # (Optional) Cat the end of the log to see why
+            tail -n 3 "${WORKER_LOG}_vllm.log"
+            continue  # Loop back to top, get NEW port, try again
+        fi
+
+        # 4. Deep Health Check (Wait for model load)
+        echo ">>> [Worker $SPLIT_ID] PID $SERVER_PID survived startup. Waiting for model load..."
+        local MAX_RETRIES=60
+        local count=0
+        local READY=0
+        
+        while [ $count -lt $MAX_RETRIES ]; do
+            if curl -s "http://localhost:$PORT/health" > /dev/null; then
+                READY=1
+                break
+            fi
+            
+            # If it dies LATE (e.g. OOM), we must catch it
+            if ! kill -0 $SERVER_PID 2>/dev/null; then
+                echo ">>> [Worker $SPLIT_ID] vLLM died during model load. Retrying..."
+                break # Break inner loop, continue outer loop
+            fi
+            
+            sleep 10
+            count=$((count+1))
+        done
+
+        # If we are ready, break the Retry Loop and move to evaluation
+        if [ $READY -eq 1 ]; then
+            echo ">>> [Worker $SPLIT_ID] Server Ready on Port $PORT!"
+            break
+        else
+            # If we timed out or died late, kill (just in case) and retry
+            kill $SERVER_PID 2>/dev/null
+            echo ">>> [Worker $SPLIT_ID] Restarting worker sequence..."
+        fi
+    done
+
+    worker_cleanup() {
+            if [ -n "$SERVER_PID" ]; then
+                echo ">>> Worker [Split $SPLIT_ID] cleaning up Server PID $SERVER_PID"
+                kill "$SERVER_PID" 2>/dev/null
+            fi
+        }
+
+    trap worker_cleanup EXIT
+
+    # 3. Run Evaluation
+    echo ">>> [Worker $SPLIT_ID] Server Ready. Running Python script..."
+    
+    python -u scripts/nsvs_evaluate_lvb.py \
+        --vlm_model_name "${MODEL}" \
+        --port_number "${PORT}" \
+        --data_dir "${DATA_DIR}" \
+        --burned_dir "${BURNED_DIR}" \
+        --output_dir "${OUT_DIR}/split_${SPLIT_ID}" \
+        --current_split "${SPLIT_ID}" \
+        --total_splits "${TOTAL_SPLITS}" \
+        --categories "${CATEGORIES[@]}" \
+        ${LMM_FLAG} \
+        ${VQA_FLAG} \
+        --max_num_frames "${MAX_NUM_FRAMES}" \
+        > "${WORKER_LOG}_eval.out" 2>&1
+
+    local PY_EXIT=$?
+    
+    # 4. Cleanup
+    echo ">>> [Worker $SPLIT_ID] Finished (Exit Code: $PY_EXIT). Stopping server..."
+    kill $SERVER_PID
+}
+
+# =========================================================
+# MAIN LOOP: Spawn Workers
+# =========================================================
+
+
+for (( i=1; i<=TOTAL_SPLITS; i++ ))
+do
+    # Calculate GPU ID (0-based) from Split ID (1-based)
+    GPU_ID=$(($GPU_START + (i-1)))
+    
+    # Launch function in background
+    launch_worker $MODEL $i $GPU_ID &
+    
+    # Small sleep to prevent all 4 servers from spiking CPU/Disk at the exact same millisecond
+    sleep 5
+done
+
+# =========================================================
+# WAIT
+# =========================================================
+echo ">>> All workers launched. Waiting for completion..."
+wait
+
+python scripts/combine_result.py "${OUT_DIR}"
+echo ">>> All jobs finished."

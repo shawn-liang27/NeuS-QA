@@ -45,10 +45,11 @@ def process_specification(specification, propositions):
 
     return new_propositions, specification
 
-def PULS(prompt, save_dir, openai_key=None):
+def PULS(prompt, id, save_dir, openai_key=None):
     if openai_key:
         os.environ["OPENAI_API_KEY"] = openai_key
-
+    save_dir = os.path.join(save_dir, id)
+    os.makedirs(save_dir, exist_ok=True)
     llm = LLM(save_dir=save_dir)
 
     full_prompt = find_prompt(prompt)
@@ -61,7 +62,7 @@ def PULS(prompt, save_dir, openai_key=None):
     final_output["proposition"] = cleaned_props
     final_output["specification"] = processed_spec
 
-    saved_path = llm.save_history()
+    saved_path = llm.save_history(id)
     final_output["saved_path"] = saved_path
 
     return final_output

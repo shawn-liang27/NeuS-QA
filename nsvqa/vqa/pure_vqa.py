@@ -15,7 +15,7 @@ class VLLMClient:
         self,
         api_key="EMPTY",
         api_base="http://localhost:8000/v1",
-        model="OpenGVLab/InternVL3_5-14B",
+        model="OpenGVLab/InternVL3_5-8B",
     ):
         self.client = OpenAI(api_key=api_key, base_url=api_base)
         self.model = model
@@ -34,6 +34,7 @@ class VLLMClient:
                 "text": "The following is the sequence of images",
             }
         )
+        # Extract frames from the dictionary
         frames = list(frames_by_cam.values())[0]
         encoded_images = [self._encode_frame(frame) for frame in frames]
         for encoded in encoded_images:
@@ -111,12 +112,13 @@ def load_video_frames(video_path, num_frames):
     cap.release()
     return images
 
-def run_experiment(data, vllm_client, output_path, max_num_frames=16, eval=True):
+def run_experiment(data, vllm_client, output_path, eval=True, max_num_frames=16):
+    
     results = []
     batch_args_all_calls = []
 
     for entry in data:
-        frames = load_video_frames(entry["paths"]["video_path"], num_frames=max_num_frames)
+        frames = load_video_frames(entry["paths"]["raw_video_path"], num_frames=max_num_frames)
         if not frames:
             continue
         for i in range(len(entry["candidates"])):
@@ -126,14 +128,15 @@ def run_experiment(data, vllm_client, output_path, max_num_frames=16, eval=True)
     predicted_answers_all_calls = vllm_client.multiple_choice_batch(batch_args_all_calls)
     total_correct = 0
     vqa_res = defaultdict(dict)
+
     for i, entry in enumerate(data):
         predicted_answer = predicted_answers_all_calls[i]
         output_dict = {
-            "video_path": entry["paths"]["cropped_path"],
+            "video_path": entry["paths"]["raw_video_path"],
             "question": entry["question"],
             "candidates": entry["candidates"],
             "predicted_answer": predicted_answer,
-            "question_category" : entry.get("metadata", {}).get("question_category", None), 
+            "question_category" : entry.get("metadata", {}).get("question_category", None),
             "video_id" : entry["metadata"]["video_id"]
         }
         
@@ -146,8 +149,8 @@ def run_experiment(data, vllm_client, output_path, max_num_frames=16, eval=True)
 
         if output_dict["question_category"] is not None:
             category = output_dict["question_category"]
-            vqa_res[category]["total"] = vqa_res[category].get("total",0) + 1
-            vqa_res[category]["num_correct"] = vqa_res[category].get("num_correct",0) + output_dict["is_correct"]
+            vqa_res[category]["total"] = vqa_res[category].get("total", 0) + 1
+            vqa_res[category]["num_correct"] = vqa_res[category].get("num_correct", 0) + output_dict["is_correct"]
         results.append(output_dict)
 
     if eval:
@@ -164,21 +167,18 @@ def run_experiment(data, vllm_client, output_path, max_num_frames=16, eval=True)
     
     with open(output_path, "w") as f:
         json.dump(results, f, indent=4)
-    
 
-def vqa(dataset_path, output_path, vlm_config, max_num_frames, eval=True):
-    with open(dataset_path, "r") as f:
-        data = json.load(f)
 
+def vqa(data, output_path, vlm_config, max_num_frames = 16, eval=True):
     vllm_client = VLLMClientMultiprocessing(
         model=vlm_config[1],
         api_base=f"http://localhost:{vlm_config[0]}/v1"
     )
+    
     run_experiment(
         data=data,
         vllm_client=vllm_client,
         output_path=output_path,
-        max_num_frames=max_num_frames,
+        max_num_frames = max_num_frames,
         eval=eval
     )
-

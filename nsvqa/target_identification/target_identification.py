@@ -1,5 +1,6 @@
 from nsvqa.puls.llm import LLM
 import json
+import os 
 
 def clean_and_parse_json(raw_str):
     start = raw_str.find("{")
@@ -8,7 +9,7 @@ def clean_and_parse_json(raw_str):
     return json.loads(json_str)
 
 
-def process_datapoint(llm, question, candidates, specification):
+def process_datapoint(llm, question, candidates, specification, video_id):
     # Construct the prompt for the LLM
     prompt = f"""Now that we have identified the specification and its temporal window in the video, let's determine where to look for the answer to the question.
 
@@ -56,7 +57,7 @@ Expected Output (only output the following JSON structure — nothing else):
     explanation = response["explanation"]
 
     # Save the conversation history with timestamp
-    history_path = llm.save_history("target")
+    history_path = llm.save_history(video_id, suffix="target")
 
     return {
         "frame_window": target_frame_window,
@@ -65,15 +66,17 @@ Expected Output (only output the following JSON structure — nothing else):
     }
 
 
-def identify_target(question, candidates, specification, conversation_history, save_dir):
+def identify_target(question, candidates, specification, conversation_history, video_id, save_dir):
     # Read the conversation history
     history_path = conversation_history
     with open(history_path, "r") as f:
         history = json.load(f)
 
+    save_dir = os.path.join(save_dir, video_id)
+    os.makedirs(save_dir, exist_ok=True)
     llm = LLM(history=history, save_dir=save_dir)
 
     # Get target identification results
-    result = process_datapoint(llm, question, candidates, specification)
+    result = process_datapoint(llm, question, candidates, specification, video_id)
     return result
 

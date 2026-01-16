@@ -1,20 +1,23 @@
 #!/bin/bash
-
-MODEL="OpenGVLab/InternVL2_5-8B"
+MODEL=$1
+MAX_LEN=$2
 # MODEL="Qwen/Qwen2.5-VL-7B-Instruct"
 export CUDA_DEVICE_ORDER="PCI_BUS_ID"
 # export NCCL_P2P_DISABLE=1
-export CUDA_VISIBLE_DEVICES="0"
-MAX_LEN=40000
+# export CUDA_VISIBLE_DEVICES=$3
+export VLLM_USE_V1=1
 # export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
-NUM_GPUS=1 # Assumes CUDA_VISIBLE_DEVICES is set
-PORT=8006
-source .venv/bin/activate
-vllm serve $MODEL \
+NUM_GPUS=8 # Assumes CUDA_VISIBLE_DEVICES is set
+PORT=$4
+GPU_UTIL_SIZE=$5
+PROCESSOR_ARGS=$6
+source .env/bin/activate
+exec vllm serve $MODEL \
     --tensor-parallel-size $NUM_GPUS \
     --port $PORT \
     --trust-remote-code \
-    --max-model-len $MAX_LEN \
-    --gpu-memory-utilization 0.95 \
+    --gpu-memory-utilization $GPU_UTIL_SIZE \
+    --mm-processor-kwargs "${PROCESSOR_ARGS}" \
+    --mm-processor-cache-gb 0
     
 

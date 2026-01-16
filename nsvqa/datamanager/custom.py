@@ -19,6 +19,7 @@ class Custom(Manager):
                 "paths": {
                     "video_path": raw_entry["video_path"]
                 },
+                "metadata": {"video_id" : raw_entry["video_id"]},
                 "question": raw_entry["question"],
                 "candidates": raw_entry["answer_choices"],
             })

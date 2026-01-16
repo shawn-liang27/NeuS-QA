@@ -5,7 +5,7 @@ import os
 
 
 class LLM:
-    def __init__(self, model="gpt-4o", history=None, save_dir="/nas/mars/experiment_result/nsvqa/9_post_submission/llm_conversation_history/"):
+    def __init__(self, model="gpt-4o", history=None, save_dir=""):
         """Initialize LLM"""
         self.client = OpenAI()
         self.model = model
@@ -33,14 +33,14 @@ class LLM:
 
         return assistant_response
 
-    def save_history(self, suffix=""):
+    def save_history(self, id, suffix=""):
         """Save conversation history to a JSON file and return the save path"""
         if not self.save_dir:
             return None
         if suffix:
-            filename = f"conversation_history_target_{suffix}.json"
+            filename = f"conversation_history_target_{suffix}_{id}.json"
         else:
-            filename = "conversation_history_target.json"
+            filename = f"conversation_history_target_{id}.json"
 
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         base_name, extension = os.path.splitext(filename)
