@@ -19,8 +19,12 @@ from torch.backends.cuda import sdp_kernel
 
 logging.basicConfig(level=logging.INFO)
 
-torch.backends.cudnn.benchmark = False
-torch.backends.cudnn.deterministic = True
+
+# # Set the library-wide logging level to DEBUG
+# transformers.utils.logging.set_verbosity_debug()
+
+# # Optional: specifically target the internvl-chat components if you have the source
+# logging.getLogger("transformers").setLevel(logging.DEBUG)
 
 class InternVL:
     """InternVL's Vision Language Model."""
@@ -183,13 +187,13 @@ class InternVL:
 
         video_prefix = "".join([f"Frame{i+1}: <image>\n" for i in range(len(num_patches_list))])
         language = video_prefix + language
-
         return self.chat_with_confidence(
             self.tokenizer,
             pixel_values,
             language,
             generation_config,
             num_patches_list=num_patches_list,
+            verbose=False
         )
 
     def chat_with_confidence(
@@ -231,7 +235,7 @@ class InternVL:
             target_device = self.model.vision_model.embeddings.patch_embedding.weight.device
         else:
             target_device = self.model.device
-            
+        
         if verbose:
             logging.info(f"DEBUG: Aligning inputs to Model Device: {target_device}")
 
@@ -282,7 +286,7 @@ class InternVL:
             if count == 0:
                 print("CRITICAL: Tokenizer split the special token string! Model has nowhere to put image features.")
             # Wrap ONLY the generate call
-            print("DEBUG: Calling generate with Math Kernel...", flush=True)
+            print("DEBUG: Calling generate NOW...", flush=True)
 
         try:
             generation_output = self.model.generate(

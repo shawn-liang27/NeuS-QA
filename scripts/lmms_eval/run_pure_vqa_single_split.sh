@@ -7,23 +7,34 @@ JOB_ID=$(date +%Y%m%d_%H%M%S)
 export HF_HOME="$HOME/.cache/huggingface"
 
 # Variables
+DATA_DIR="/usr/homes/sgl57/.data/LongVideoBench"
+BURNED_DIR="/usr/homes/sgl57/.data/LongVideoBench/burn-subtitles/T3E_E3E_T3O_O3O_mix_2026_01_14_21_55"
 MODEL=$1
+MAX_TOKEN_LEN=65000
 
 CATEGORIES=("T3E" "E3E" "T3O" "O3O") # "T3E", "E3E", "T3O", "O3O"
 CAT_STR=$(IFS='_'; echo "${CATEGORIES[*]}")
+OUT_DIR="$JOB_DIR/experiment_results/pure_vqa/"${MODEL//\//_}"/vqa_qa_${CAT_STR}_${JOB_ID}"
 
-NSVS_VQA_DIR="$JOB_DIR/experiment_results/nsvs_vqa/"${MODEL//\//_}"/nsvs_vqa_${CAT_STR}_${JOB_ID}"
+USE_LMM=true
+if [[ "${USE_LMM,,}" == "true" ]]; then
+    LMM_FLAG="--use_lmm_evals"
+else
+    LMM_FLAG=""
+fi
 
-# EXPERIMENT_DIR="/usr/homes/sgl57/NeuS-VLM/NeuS-QA/experiment_results/nsvs/OpenGVLab_InternVL2_5-8B/nsvs_qa_E3E_T3O_O3O_20251226_000802"
-# EXPERIMENT_DIR="/usr/homes/sgl57/NeuS-VLM/NeuS-QA/experiment_results/nsvs/InternVL2-8B/nsvs_qa_T3E_E3E_T3O_O3O_20260112_173959"
-EXPERIMENT_DIR="/usr/homes/sgl57/NeuS-VLM/NeuS-QA/experiment_results/nsvs/InternVL2-8B/nsvs_qa_T3E_E3E_T3O_O3O_20260114_230246"
+PURE_VQA=true
+if [[ "${PURE_VQA,,}" == "true" ]]; then
+    VQA_FLAG="--pure_vqa"
+else
+    VQA_FLAG=""
+fi
 
 MAX_NUM_FRAMES=$2
-MAX_TOKEN_LEN=60000
 
-mkdir -p "$NSVS_VQA_DIR"
+mkdir -p "$OUT_DIR"
 
-LOG_DIR="$NSVS_VQA_DIR/logs"
+LOG_DIR="$OUT_DIR/logs"
 mkdir -p "$LOG_DIR"
 
 echo ">>> Starting Parallel Job: $JOB_ID"
@@ -36,10 +47,10 @@ source .env/bin/activate
 # CONFIGURATION
 # =========================================================
 TOTAL_SPLITS=4  # Set this to your number of GPUs
-GPU=$3
-GPU_USAGE=$4
+CURRENT_SPLIT=$3
+GPU=$4
 NGRES=$5
-SPLIT_ACROSS=true
+GPU_USAGE=$6
 # =========================================================
 # FUNCTION: Worker Logic (Runs in Parallel)
 # =========================================================
@@ -52,7 +63,6 @@ launch_worker() {
     # Unique log files for this worker
     local WORKER_LOG="${LOG_DIR}/worker_${SPLIT_ID}"
     local PROCESSOR_ARGS='{"max_dynamic_patch": 12}'
-
     while true; do
         # 1. Ask the OS for a random FREE ephemeral port (High range guaranteed)
         local PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("", 0)); print(s.getsockname()[1]); s.close()')
@@ -60,10 +70,11 @@ launch_worker() {
         echo ">>> [Worker $SPLIT_ID] Attempting to start on GPU $GPU_ID | Port $PORT"
 
         # 2. Start vLLM Server
-        export CUDA_VISIBLE_DEVICES=$GPU_ID
+        # export CUDA_VISIBLE_DEVICES=$GPU_ID
         export VLLM_PORT=$PORT
+        
         # Overwrite the log for this attempt
-        ./scripts/vllm_serve.sh "$MODEL" "$MAX_TOKEN_LEN" "$GPU_ID" "$PORT" "$GPU_USAGE" "$PROCESSOR_ARGS" "$NGRES"> "${WORKER_LOG}_vllm.log" 2>&1 &
+        ./scripts/vllm_serve.sh "$MODEL" "$MAX_TOKEN_LEN" "$GPU_ID" "$PORT" "$GPU_USAGE" "$PROCESSOR_ARGS" "$NGRES" > "${WORKER_LOG}_vllm.log" 2>&1 &
         local SERVER_PID=$!
 
         # vLLM takes a few seconds to import torch. wait 5s to catch early crashes.
@@ -120,14 +131,20 @@ launch_worker() {
 
     # 3. Run Evaluation
     echo ">>> [Worker $SPLIT_ID] Server Ready. Running Python script..."
+    
     local START_TIME=$(date +%s)
 
-    python -u scripts/lmms_eval/nsvs_repeat_vqa.py \
+    python -u scripts/pure_vqa_evaluate_lvb.py \
         --vlm_model_name "${MODEL}" \
         --port_number "${PORT}" \
-        --out_dir "${NSVS_VQA_DIR}/split_${SPLIT_ID}" \
-        --experiment_dir "${EXPERIMENT_DIR}/split_${SPLIT_ID}" \
+        --data_dir "${DATA_DIR}" \
+        --burned_dir "${BURNED_DIR}" \
+        --output_dir "${OUT_DIR}/split_${SPLIT_ID}" \
         --current_split "${SPLIT_ID}" \
+        --total_splits "${TOTAL_SPLITS}" \
+        --categories "${CATEGORIES[@]}" \
+        ${LMM_FLAG} \
+        ${VQA_FLAG} \
         --max_num_frames "${MAX_NUM_FRAMES}" \
         > "${WORKER_LOG}_eval.out" 2>&1
 
@@ -145,7 +162,6 @@ launch_worker() {
 
     # 4. Cleanup
     echo ">>> [Worker $SPLIT_ID] Finished (Exit Code: $PY_EXIT) in ${HOURS}h ${MINS}m ${SECS}s. Stopping server..." >> "${WORKER_LOG}_eval.out"
-
 }
 
 # =========================================================
@@ -153,27 +169,25 @@ launch_worker() {
 # =========================================================
 
 
-for (( i=1; i<=TOTAL_SPLITS; i++ ))
-do
-    # Calculate GPU ID (0-based) from Split ID (1-based)
-    if [[ "${SPLIT_ACROSS,,}" == "true" ]]; then
-        GPU_ID=$GPU
-    else
-        GPU_ID=$(($GPU_START + (i-1)))
-    fi
+# for (( i=1; i<=TOTAL_SPLITS; i++ ))
+# do
+#     # Calculate GPU ID (0-based) from Split ID (1-based)
+#     GPU_ID=$(($GPU_START + (i-1)))
     
-    # Launch function in background
-    launch_worker $MODEL $i $GPU_ID $NGRES &
+#     # Launch function in background
+#     launch_worker $MODEL $i $GPU_ID &
     
-    # Small sleep to prevent all 4 servers from spiking CPU/Disk at the exact same millisecond
-    sleep 5
-done
+#     # Small sleep to prevent all 4 servers from spiking CPU/Disk at the exact same millisecond
+#     sleep 5
+# done
+
+launch_worker $MODEL $CURRENT_SPLIT $GPU $NGRES &
 # =========================================================
 # WAIT
 # =========================================================
 echo ">>> All workers launched. Waiting for completion..."
 wait
 
-python scripts/combine_result.py "${NSVS_VQA_DIR}" --prefix "repeat_vqa_run_"${MODEL//\//_}"_${JOB_ID}"
+python scripts/combine_result.py "${OUT_DIR}"
 
 echo ">>> All jobs finished."

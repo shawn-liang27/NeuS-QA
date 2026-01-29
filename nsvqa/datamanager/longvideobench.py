@@ -7,7 +7,7 @@ import shutil
 import json
 import copy
 import os
-
+import time
 
 class LongVideoBench(Manager):
     def __init__(self, dataset_path, burned_path, categories, postprocess_dir="", read_number = 1000):
@@ -66,7 +66,7 @@ class LongVideoBench(Manager):
         return [entry for entries in category_buckets.values() for entry in entries]
 
 
-    def postprocess_data(self, nsvs_path, postprocess_dir=""):
+    def postprocess_data(self, nsvs_path, postprocess_dir="", measure_metrics):
         assert self.postprocess_dir is not None
         self._nsvs_path = nsvs_path
 
@@ -78,12 +78,17 @@ class LongVideoBench(Manager):
 
         output = []
         for entry_nsvs in tqdm(nsvs_data):
+            
             entry_nsvs["paths"]["cropped_path"] = os.path.join(cropped_dir, f'{entry_nsvs["metadata"]["id"]}.mp4')
+            crop_start = time.perf_counter() if measure_metrics else 0
             self.crop_video(
                 entry_nsvs,
                 save_path=entry_nsvs["paths"]["cropped_path"],
                 ground_truth=False
             )
+            if measure_metrics: 
+                entry_nsvs["time_metrics"]["cropping_video"] = time.perf_counter() - crop_start
+
             if os.path.exists(entry_nsvs["paths"]["cropped_path"]): # if crop successful
                 output.append(entry_nsvs)
 

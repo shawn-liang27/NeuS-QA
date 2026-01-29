@@ -33,8 +33,9 @@ set +a
 # =========================================================
 # CONFIGURATION
 # =========================================================
-TOTAL_SPLITS=4  # Set this to your number of GPUs
+TOTAL_SPLITS=8  # Set this to your number of GPUs
 GPU_START=$1
+FRAME_WINDOW=$2
 export CUDA_VISIBLE_DEVICE=0,1,2,3,4,5,6,7
 # =========================================================
 # FUNCTION: Worker Logic (Runs in Parallel)
@@ -58,7 +59,8 @@ launch_worker() {
         --current_split "${SPLIT_ID}" \
         --total_splits "${TOTAL_SPLITS}" \
         --categories "${CATEGORIES[@]}" \
-        > "${WORKER_LOG}_eval.out" 2>&1
+        --frame_window ${FRAME_WINDOW} \
+        --measure_metrics > "${WORKER_LOG}_eval.out" 2>&1
 
     local PY_EXIT=$?
     

@@ -16,16 +16,93 @@ import datetime
 import argparse
 import logging
 
+import time
+from collections import defaultdict
+
+def aggregate_metrics(raw_results):
+    """
+    raw_results: list of { "category": str, "time_metrics": dict }
+    time_metrics dict format:
+    time_metrics: {
+        "completion_time" : float,
+        "PULS_time" : float,
+        "Target_ID_time" : float, 
+        "NeuS_time" : float,
+        "num_propositions" : int,
+        "frame_count" : int,
+        "video_IO_time" : float
+        "num_frame_windows" : int,
+        "per_proposition_detection_time" : list[float],
+        "per_frame_window_detection_time" : list[float],
+        "model_checks_time" : list[float],
+        "num_model_checks" : int,
+        "num_vlm_detections" : int
+    }
+    """
+    # 1. Initialize data structures
+    category_accumulators = defaultdict(lambda: defaultdict(float))
+    category_counts = defaultdict(int)
+    
+    global_accumulator = defaultdict(float)
+    global_count = 0
+
+    # List of keys to sum directly
+    scalar_keys = [
+        "completion_time", "PULS_time", "Target_ID_time", "NeuS_time", "frame_count", 
+        "num_propositions", "num_frame_windows", "num_model_checks", "num_vlm_detections", "video_IO_time", "automaton_set_up_time"
+    ]
+    # List of keys that are lists in raw data (require nested summing)
+    list_keys = ["per_proposition_detection_time", "model_checks_time", "per_frame_window_detection_time"]
+
+    # 2. Single-pass Accumulation
+    for entry in raw_results:
+        entry["time_metrics"]["frame_count"] = entry["metadata"].get("frame_count", 0)
+        cat = entry["metadata"]["duration_group"]
+        metrics = entry["time_metrics"]
+        
+        category_counts[cat] += 1
+        global_count += 1
+
+        for key in scalar_keys:
+            val = metrics.get(key, 0)
+            category_accumulators[cat][key] += val
+            global_accumulator[key] += val
+
+        for key in list_keys:
+            val_list = metrics.get(key, [])
+            length = len(val_list) if len(val_list) > 0 else 1
+            total_time = sum(val_list) / length
+            # We track the sum of sums for the high-level average
+            category_accumulators[cat][key] += total_time
+            global_accumulator[key] += total_time
+
+    # 3. Final Aggregation
+    category_aggregated = {}
+    for cat, totals in category_accumulators.items():
+        count = category_counts[cat]
+        category_aggregated[cat] = {
+            "count": count,
+            **{f"avg_{k}": v / count for k, v in totals.items()}
+        }
+
+    global_aggregated = {
+        "total_questions": global_count,
+        **{f"global_avg_{k}": v / global_count for k, v in global_accumulator.items()}
+    }
+
+    return {"Categorical Metrics" : category_aggregated, "Global Metrics" :global_aggregated}
+
 
 def exec_puls(entry, save_dir): # Step 1
-    output = PULS(entry["question"], entry["metadata"]["id"], save_dir=save_dir)
     print("PULS is called")
+    output = PULS(entry["question"], entry["metadata"]["id"], save_dir=save_dir)
     entry["puls"] = {}
     entry["puls"]["proposition"] = output["proposition"]
     entry["puls"]["specification"] = output["specification"]
     entry["puls"]["conversation_history"] = os.path.join(os.getcwd(), output["saved_path"])
 
 def exec_target_identification(entry, save_dir): # Step 2
+    print("Target ID is called")
     output = identify_target(
         entry["question"],
         entry["candidates"],
@@ -40,16 +117,23 @@ def exec_target_identification(entry, save_dir): # Step 2
     entry["target_identification"]["explanation"] = output["explanation"]
     entry["target_identification"]["conversation_history"] = os.path.join(os.getcwd(), output["saved_path"])
 
-def exec_nsvs(entry, sample_rate, device, model, vlm): # Step 3
-    print(entry["paths"]["video_path"])
+def exec_nsvs(entry, sample_rate, device, model, vlm, num_of_frame_in_sequence ,measure_metrics): # Step 3
+    print(f'NeuS Module is Called {entry["paths"]["video_path"]}')
+
+    # 1. Video IO time
+    io_start = time.perf_counter() if measure_metrics else 0
     reader = Mp4Reader(path=entry["paths"]["video_path"], sample_rate=sample_rate)
     video_data = reader.read_video()
+    if measure_metrics: entry["time_metrics"]["video_IO_time"] = time.perf_counter() - io_start
+
     if "metadata" not in entry:
         entry["metadata"] = {}
+    
     entry["metadata"]["fps"] = video_data["video_info"]["fps"]
     entry["metadata"]["frame_count"] = video_data["video_info"]["frame_count"]
+    entry["metadata"]["num_of_frame_in_sequence"] = num_of_frame_in_sequence
     try:
-        output, indices = run_nsvs(
+        output, indices, run_metrics = run_nsvs(
             video_data,
             entry["paths"]["video_path"],
             entry["puls"]["proposition"],
@@ -57,15 +141,26 @@ def exec_nsvs(entry, sample_rate, device, model, vlm): # Step 3
             device=device,
             model=model,
             vlm=vlm,
+            measure_metrics=measure_metrics,
+            num_of_frame_in_sequence=num_of_frame_in_sequence
         )
+        print('Exited NSVS')
     except Exception as e:
         entry["metadata"]["error"] = repr(e)
         output = [-1]
         indices = []
+        run_metrics = {}
+        print(f"DEBUG: run_nsvs failed with: {e}")
+        
     
     entry["nsvs"] = {}
     entry["nsvs"]["output"] = output
     entry["nsvs"]["indices"] = indices
+
+    if measure_metrics:
+        print(run_metrics)
+        for metric, value in run_metrics.items():
+            entry["time_metrics"][metric] = value
 
 def exec_merge(entry): # Step 4
     inner = entry["target_identification"]["frame_window"].strip()[1:-1]
@@ -88,7 +183,7 @@ def exec_merge(entry): # Step 4
     else:
         entry["frames_of_interest"] = [-1]
 
-def run_nsvqa(output_dir, llm_convo_dir, current_split, total_splits, vlm_config, data_dir, data_loader):
+def run_nsvqa(output_dir, llm_convo_dir, current_split, total_splits, vlm_config, data_dir, data_loader, frame_window = 3, measure_metrics=False):
     data = data_loader.load_data()
     print(f'Data Loading Complete! Data Length {len(data)}\nStarting NSVS Module')
     output = []
@@ -97,13 +192,43 @@ def run_nsvqa(output_dir, llm_convo_dir, current_split, total_splits, vlm_config
     vlm = InternVL(model_name=vlm_config[1], device=vlm_config[0])
     for i in range(starting, ending):
         print("\n" + "*"*50 + f" {i}/{len(data)-1} " + "*"*50)
+        metrics = {} if measure_metrics else None
         entry = data[i]
+        if measure_metrics: 
+            print("time metrics added")
+            entry["time_metrics"] = {}
+        # 1. Start Total Completion Timer
+        t_start = time.perf_counter() if measure_metrics else 0
+
+        # 2. Module: PULS
+        p_start = time.perf_counter() if measure_metrics else 0
         exec_puls(entry, llm_convo_dir)
+        if measure_metrics: 
+            metrics["PULS_time"] = time.perf_counter() - p_start
+            metrics["num_propositions"] = len(entry["puls"]["proposition"])
+
+        # 3. Module: Target Identification
+        tid_start = time.perf_counter() if measure_metrics else 0
         exec_target_identification(entry, llm_convo_dir)
-        exec_nsvs(entry, sample_rate=1, device=vlm_config[0], model=vlm_config[1], vlm=vlm)
+        if measure_metrics: metrics["Target_ID_time"] = time.perf_counter() - tid_start
+
+        # 4. Module: NSVS (The primary bottleneck)
+        # Note: Ensure exec_nsvs is modified to accept and return per-window timing
+        n_start = time.perf_counter() if measure_metrics else 0
+        # Pass the pre-initialized vlm here
+        exec_nsvs(entry, sample_rate=1, device=vlm_config[0], model=vlm_config[1], vlm=vlm, num_of_frame_in_sequence=frame_window, measure_metrics=measure_metrics)
+        if measure_metrics: metrics["NeuS_time"] = time.perf_counter() - n_start
+
+        # 5. Finalize Total Time
+        if measure_metrics:
+            metrics["completion_time"] = time.perf_counter() - t_start
+            for key, value in metrics.items():
+                entry.get("time_metrics", {})[key] = value
+
         exec_merge(entry)
         output.append(entry)
-
+        print(f'Neus Complete with question {entry["metadata"]["id"]}')
+        print(f'Runtime metrics on {entry["metadata"]["id"]}:\n{entry["time_metrics"]}')
     with open(output_dir, "w") as f:
         json.dump(output, f, indent=4)
 
@@ -115,7 +240,7 @@ def main(args):
 
     os.makedirs(experiment_dir, exist_ok=True)
     os.makedirs(f'{experiment_dir}/nsvqa_output', exist_ok=True)
-    os.makedirs(f'{experiment_dir}/vqa_output', exist_ok=True)
+    # os.makedirs(f'{experiment_dir}/vqa_output', exist_ok=True)
     os.makedirs(f'{experiment_dir}/postprocess_output', exist_ok=True)
 
     nsvqa_dir = f"{experiment_dir}/nsvqa_output/nsvqa_output_{current_split}.json"
@@ -124,16 +249,23 @@ def main(args):
     nsvs_llm_convo_dir = f"{experiment_dir}/llm_conversation_history/"
 
     print(f'Loading Data from Data_Dir: {args.data_dir}\nBurned_Dir: {args.burned_dir}')
-
+        
     data_loader = LongVideoBench(dataset_path=args.data_dir, burned_path=args.burned_dir, postprocess_dir=postprocess_dir, categories=args.categories)
 
-    run_nsvqa(output_dir=nsvqa_dir, llm_convo_dir=nsvs_llm_convo_dir, current_split=args.current_split, total_splits=args.total_splits, vlm_config=vlm_config, data_dir=args.data_dir, data_loader=data_loader)
+    run_nsvqa(output_dir=nsvqa_dir, llm_convo_dir=nsvs_llm_convo_dir, current_split=args.current_split, total_splits=args.total_splits, vlm_config=vlm_config, data_dir=args.data_dir, data_loader=data_loader, frame_window=args.frame_window, measure_metrics=args.measure_metrics)
+    # Time PostProcess
+    data_loader.postprocess_data(nsvqa_dir, args.measure_metrics)
 
-    data_loader.postprocess_data(nsvqa_dir)
-    # if args.use_lmm_evals:
-    #     lmm_eval_vqa(postprocess_dir, vqa_dir, vlm_config, max_num_frames=args.max_num_frames, eval=True, pure_vqa=args.pure_vqa)
-    # else:
-    #     vqa(postprocess_dir, vqa_dir, vlm_config, max_num_frames=args.max_num_frames, eval=True)
+    if args.measure_metrics:
+        runtime_metrics_dir = f"{experiment_dir}/runtime_metrics"
+        os.makedirs(runtime_metrics_dir, exist_ok=True)
+        with open(postprocess_dir, "r") as file:
+            raw_result = json.load(file)
+        metrics_result = aggregate_metrics(raw_result)
+        print(f"Saving Time Metrics Result to '{runtime_metrics_dir}/runtime_metrics_{current_split}.json'")
+        with open(f'{runtime_metrics_dir}/runtime_metrics_{current_split}.json', "w") as f:
+            json.dump(metrics_result, f, indent=4)
+    
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -145,6 +277,8 @@ if __name__ == "__main__":
     parser.add_argument("--current_split", type=int)
     parser.add_argument("--total_splits", type=int)
     parser.add_argument('--categories', nargs='+', type=str)
+    parser.add_argument("--frame_window", type=int, default=3)
+    parser.add_argument("--measure_metrics", action='store_true', default = False)
     # parser.add_argument("--use_lmm_evals", action='store_true', default = True)
     # parser.add_argument("--pure_vqa", action='store_true', default = False)
     # parser.add_argument("--max_num_frames", type=int, default = 32)

@@ -12,7 +12,7 @@ experiment_results/
 __pycache__/
 *.py[cod]
 *$py.class
-
+lmms-eval/
 # C extensions
 *.so
 
@@ -138,6 +138,7 @@ celerybeat.pid
 *.sage.py
 
 # Environments
+.env_lmms-eval
 .env
 .ENV
 .venv

@@ -4,10 +4,15 @@ MAX_LEN=$2
 # MODEL="Qwen/Qwen2.5-VL-7B-Instruct"
 export CUDA_DEVICE_ORDER="PCI_BUS_ID"
 # export NCCL_P2P_DISABLE=1
-# export CUDA_VISIBLE_DEVICES=$3
+DEVICES=$3
+if [[ "${DEVICES,,}" == "-1" ]]; then
+    unset CUDA_VISIBLE_DEVICES
+else
+    export CUDA_VISIBLE_DEVICES=$3
+fi
 export VLLM_USE_V1=1
 # export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
-NUM_GPUS=8 # Assumes CUDA_VISIBLE_DEVICES is set
+NUM_GPUS=$7 # Assumes CUDA_VISIBLE_DEVICES is set
 PORT=$4
 GPU_UTIL_SIZE=$5
 PROCESSOR_ARGS=$6

@@ -1,15 +1,25 @@
 #!/bin/bash
 set -euo pipefail
 
+# =========================================================
+# Variables
+MODEL=$1
+TOTAL_SPLITS=4  # Set this to your number of GPUs
+MAX_NUM_FRAMES=$2
+CURRENT_SPLIT=$3
+GPU=$4
+NGRES=$5
+GPU_USAGE=$6
+CATEGORIES=("T3E" "E3E" "T3O" "O3O") # "T3E", "E3E", "T3O", "O3O"
+# =========================================================
+# configurations
+
 JOB_DIR="$HOME/NeuS-VLM/NeuS-QA"
 JOB_ID=$(date +%Y%m%d_%H%M%S)
 
 export HF_HOME="$HOME/.cache/huggingface"
 
-# Variables
-MODEL=$1
 
-CATEGORIES=("T3E" "E3E" "T3O" "O3O") # "T3E", "E3E", "T3O", "O3O"
 CAT_STR=$(IFS='_'; echo "${CATEGORIES[*]}")
 
 NSVS_VQA_DIR="$JOB_DIR/experiment_results/nsvs_vqa/"${MODEL//\//_}"/nsvs_vqa_${CAT_STR}_${JOB_ID}"
@@ -18,7 +28,6 @@ NSVS_VQA_DIR="$JOB_DIR/experiment_results/nsvs_vqa/"${MODEL//\//_}"/nsvs_vqa_${C
 # EXPERIMENT_DIR="/usr/homes/sgl57/NeuS-VLM/NeuS-QA/experiment_results/nsvs/InternVL2-8B/nsvs_qa_T3E_E3E_T3O_O3O_20260112_173959"
 EXPERIMENT_DIR="/usr/homes/sgl57/NeuS-VLM/NeuS-QA/experiment_results/nsvs/InternVL2-8B/nsvs_qa_T3E_E3E_T3O_O3O_20260114_230246"
 
-MAX_NUM_FRAMES=$2
 MAX_TOKEN_LEN=60000
 
 mkdir -p "$NSVS_VQA_DIR"
@@ -32,14 +41,6 @@ echo ">>> Logs will be saved to: $LOG_DIR"
 source ./activate_storm.sh
 source .env/bin/activate
 
-# =========================================================
-# CONFIGURATION
-# =========================================================
-TOTAL_SPLITS=4  # Set this to your number of GPUs
-GPU=$3
-GPU_USAGE=$4
-NGRES=$5
-SPLIT_ACROSS=true
 # =========================================================
 # FUNCTION: Worker Logic (Runs in Parallel)
 # =========================================================
@@ -60,7 +61,6 @@ launch_worker() {
         echo ">>> [Worker $SPLIT_ID] Attempting to start on GPU $GPU_ID | Port $PORT"
 
         # 2. Start vLLM Server
-        export CUDA_VISIBLE_DEVICES=$GPU_ID
         export VLLM_PORT=$PORT
         # Overwrite the log for this attempt
         ./scripts/vllm_serve.sh "$MODEL" "$MAX_TOKEN_LEN" "$GPU_ID" "$PORT" "$GPU_USAGE" "$PROCESSOR_ARGS" "$NGRES"> "${WORKER_LOG}_vllm.log" 2>&1 &
@@ -153,24 +153,22 @@ launch_worker() {
 # =========================================================
 
 
-for (( i=1; i<=TOTAL_SPLITS; i++ ))
-do
-    # Calculate GPU ID (0-based) from Split ID (1-based)
-    if [[ "${SPLIT_ACROSS,,}" == "true" ]]; then
-        GPU_ID=$GPU
-    else
-        GPU_ID=$(($GPU_START + (i-1)))
-    fi
+# for (( i=1; i<=TOTAL_SPLITS; i++ ))
+# do
+#     # Calculate GPU ID (0-based) from Split ID (1-based)
+#     GPU_ID=$(($GPU_START + (i-1)))
     
-    # Launch function in background
-    launch_worker $MODEL $i $GPU_ID $NGRES &
+#     # Launch function in background
+#     launch_worker $MODEL $i $GPU_ID &
     
-    # Small sleep to prevent all 4 servers from spiking CPU/Disk at the exact same millisecond
-    sleep 5
-done
+#     # Small sleep to prevent all 4 servers from spiking CPU/Disk at the exact same millisecond
+#     sleep 5
+# done
 # =========================================================
 # WAIT
 # =========================================================
+launch_worker $MODEL $CURRENT_SPLIT $GPU $NGRES &
+
 echo ">>> All workers launched. Waiting for completion..."
 wait
 
