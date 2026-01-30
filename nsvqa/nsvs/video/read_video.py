@@ -1,7 +1,8 @@
 from typing import List
 import numpy as np
 import cv2
-
+from decord import VideoReader, cpu
+import numpy as np
 
 class Mp4Reader():
     def __init__(self, path: str, sample_rate: float = 1.0):
@@ -61,3 +62,31 @@ class Mp4Reader():
         }
         return output
 
+
+def read_video_fast(path, sample_rate=1.0):
+    # ctx=cpu(0) for CPU, ctx=gpu(0) for hardware acceleration
+    vr = VideoReader(path, ctx=cpu(0))
+    fps = vr.get_avg_fps()
+    
+    # Logic to get indices (similar to your current logic)
+    frame_count = len(vr)
+    duration_sec = frame_count / fps
+    times = np.arange(0.0, duration_sec, 1.0 / sample_rate)
+    idxs = [int(round(t * fps)) for t in times if t * fps < frame_count]
+    
+    # THE SPEEDUP: get_batch grabs all frames in one optimized call
+    frames = vr.get_batch(idxs).asnumpy()
+    
+    # Decord returns (Batch, Height, Width, Channels) in RGB already!
+    output = {
+            "video_path": self.path,
+            "sample_rate": self.sample_rate,
+            "video_info": video_info,
+            "images": images,
+        }
+
+    return {
+        "images": [f for f in frames], # Convert back to a list of arrays,
+        "sample_rate" : sample_rate,
+        "video_info": {"fps": fps, "frame_count": frame_count}
+    }

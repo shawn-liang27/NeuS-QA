@@ -8,7 +8,7 @@ from nsvqa.nsvs.nsvs import *
 from nsvqa.puls.puls import *
 from nsvqa.vqa.vqa import vqa
 from nsvqa.vqa.lmm_vqa import lmm_eval_vqa
-from nsvqa.nsvs.vlm.internvl import InternVL
+from nsvqa.nsvs.vlm.internvl_batch import InternVL
 
 import json
 import os
@@ -122,8 +122,8 @@ def exec_nsvs(entry, sample_rate, device, model, vlm, num_of_frame_in_sequence ,
 
     # 1. Video IO time
     io_start = time.perf_counter() if measure_metrics else 0
-    reader = Mp4Reader(path=entry["paths"]["video_path"], sample_rate=sample_rate)
-    video_data = reader.read_video()
+    video_data = read_video_fast(path=entry["paths"]["video_path"], sample_rate=sample_rate)
+
     if measure_metrics: entry["time_metrics"]["video_IO_time"] = time.perf_counter() - io_start
 
     if "metadata" not in entry:
@@ -144,7 +144,7 @@ def exec_nsvs(entry, sample_rate, device, model, vlm, num_of_frame_in_sequence ,
             measure_metrics=measure_metrics,
             num_of_frame_in_sequence=num_of_frame_in_sequence
         )
-        print('Exited NSVS')
+
     except Exception as e:
         entry["metadata"]["error"] = repr(e)
         output = [-1]
@@ -190,6 +190,10 @@ def run_nsvqa(output_dir, llm_convo_dir, current_split, total_splits, vlm_config
     starting = (len(data) * (current_split-1)) // total_splits
     ending = (len(data) * current_split) // total_splits
     vlm = InternVL(model_name=vlm_config[1], device=vlm_config[0])
+    print("Loading CLIP model to GPU...")
+    clip_model = SentenceTransformer('clip-ViT-B-32', device=f'cuda:{vlm_config[0]}')
+    clip_model.eval() # Set to evaluation mode for speed
+
     for i in range(starting, ending):
         print("\n" + "*"*50 + f" {i}/{len(data)-1} " + "*"*50)
         metrics = {} if measure_metrics else None
