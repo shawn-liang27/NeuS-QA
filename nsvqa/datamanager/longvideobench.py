@@ -8,6 +8,23 @@ import json
 import copy
 import os
 import time
+from concurrent.futures import ProcessPoolExecutor, as_completed
+
+def _crop_worker_static(cls_instance, entry, measure_metrics):
+    start = time.perf_counter() if measure_metrics else 0
+    try:
+        # We pass the instance so we can still call crop_video
+        cls_instance.crop_video(
+            entry,
+            save_path=entry["paths"]["cropped_path"],
+            ground_truth=False
+        )
+        success = os.path.exists(entry["paths"]["cropped_path"])
+        duration = time.perf_counter() - start if measure_metrics else 0
+        return entry, success, duration
+    except Exception as e:
+        print(f"Error cropping {entry.get('metadata', {}).get('id')}: {e}")
+        return entry, False, 0
 
 class LongVideoBench(Manager):
     def __init__(self, dataset_path, burned_path, categories, postprocess_dir="", read_number = 1000):
@@ -76,119 +93,31 @@ class LongVideoBench(Manager):
         with open(self._nsvs_path, "r") as f:
             nsvs_data = json.load(f)
 
+        for entry in nsvs_data:
+            entry["paths"]["cropped_path"] = os.path.join(cropped_dir, f'{entry["metadata"]["id"]}.mp4')
+
         output = []
-        for entry_nsvs in tqdm(nsvs_data):
+    
+        max_workers = 10
+        print(f"Starting parallel cropping with {max_workers} workers...")
+        
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            # Map the tasks to the executor
+            futures = {
+                executor.submit(_crop_worker_static, self, entry, measure_metrics): entry 
+                for entry in nsvs_data
+            }
             
-            entry_nsvs["paths"]["cropped_path"] = os.path.join(cropped_dir, f'{entry_nsvs["metadata"]["id"]}.mp4')
-            crop_start = time.perf_counter() if measure_metrics else 0
-            self.crop_video(
-                entry_nsvs,
-                save_path=entry_nsvs["paths"]["cropped_path"],
-                ground_truth=False
-            )
-            if measure_metrics: 
-                entry_nsvs["time_metrics"]["cropping_video"] = time.perf_counter() - crop_start
+            # tqdm tracks progress as tasks complete
+            for future in tqdm(as_completed(futures), total=len(nsvs_data), desc="Cropping Videos"):
+                entry, success, duration = future.result()
+                
+                if success:
+                    if measure_metrics:
+                        # Initialize time_metrics if it doesn't exist
+                        entry.setdefault("time_metrics", {})["cropping_video"] = duration
+                    output.append(entry)
 
-            if os.path.exists(entry_nsvs["paths"]["cropped_path"]): # if crop successful
-                output.append(entry_nsvs)
-
+        # 4. Save results
         with open(self.postprocess_dir, "w") as f:
             json.dump(output, f, indent=4)
-
-        # run_name = self._nsvs_path.split('/')[-1].split('.')[0].replace('longvideobench_', '')
-        # self._output_path_nsvqa = f"/nas/mars/experiment_result/nsvqa/6_formatted_output/longvideobench_nsvqa_{run_name}"
-        # if self.compile_position:
-        #     self._output_path_position = f"/nas/mars/experiment_result/nsvqa/6_formatted_output/longvideobench_position_{run_name}"
-        # if self.compile_full:
-        #     self._output_path_full = f"/nas/mars/experiment_result/nsvqa/6_formatted_output/longvideobench_full_{run_name}"
-
-        # os.makedirs(os.path.join(self._output_path_nsvqa, "videos"), exist_ok=True)
-        
-        # if self.compile_position:
-        #     os.makedirs(os.path.join(self._output_path_position, "videos"), exist_ok=True)
-        # if self.compile_full:
-        #     os.makedirs(os.path.join(self._output_path_full, "videos"), exist_ok=True)
-        #     shutil.copytree("/nas/mars/experiment_result/nsvqa/6_formatted_output/longvideobench_full/video", os.path.join(self._output_path_full, "videos"), dirs_exist_ok=True)
-
-        # with open(os.path.join(self._dataset_path, "lvb_val.json"), "r") as f:
-        #     lvb_data = json.load(f)
-        # with open(self._nsvs_path, "r") as f:
-        #     nsvs_data = json.load(f)
-
-        # output_nsvqa = []    # nsvqa cropped video
-        # output_full = []     # entire video
-        # for entry_nsvs in tqdm(nsvs_data):
-        #     found = False
-        #     for entry in lvb_data:
-        #         if entry["question"] == entry_nsvs["question"] and entry["id"] == entry_nsvs["metadata"]["id"]:
-        #             found = True
-
-        #             candidates = entry["candidates"]
-        #             for i in range(5):
-        #                 if i < len(candidates):
-        #                     entry[f"option{i}"] = candidates[i]
-        #                 else:
-        #                     entry[f"option{i}"] = "N/A"
-
-        #             entry_full = copy.deepcopy(entry)
-
-        #             code = entry["question"] + entry["id"]
-        #             id = hashlib.sha256(code.encode()).hexdigest()
-        #             entry["id"] = id + "_0"
-        #             entry["video_id"] = id
-        #             entry["paths"]["video_path"] = id + ".mp4"
-
-
-        #             self.crop_video(
-        #                 entry_nsvs, 
-        #                 save_path=os.path.join(self._output_path_nsvqa, "videos", entry["paths"]["video_path"]),
-        #                 ground_truth=False
-        #             )
-
-        #             if os.path.exists(os.path.join(self._output_path_nsvqa, "videos", entry["paths"]["video_path"])): # if crop is successful
-        #                 if self.compile_position:
-        #                     self.crop_video(
-        #                         entry_nsvs, 
-        #                         save_path=os.path.join(self._output_path_position, "videos", entry["paths"]["video_path"]),
-        #                         ground_truth=True
-        #                     )
-
-        #                 output_nsvqa.append(entry)
-        #                 output_full.append(entry_full)
-
-        #     if found == False:
-        #         print(f"Entry not found for question: {entry_nsvs['question']}")
-
-        # with open(os.path.join(self._output_path_nsvqa, "lvb_val.json"), "w") as f:
-        #     json.dump(output_nsvqa, f, indent=4)
-        # if self.compile_position:
-        #     with open(os.path.join(self._output_path_position, "lvb_val.json"), "w") as f:
-        #         json.dump(output_nsvqa, f, indent=4)
-        # if self.compile_full:
-        #     with open(os.path.join(self._output_path_full, "lvb_val.json"), "w") as f:
-        #         json.dump(output_full, f, indent=4)
-
-
-# 0   to 53
-# 54  to 107
-# 108 to 161
-# 162 to 215
-# 216 to 270
-
-
-# 0 to 67
-# 68 to 135
-# 136 to 202
-# 202 to 270
-
-
-
-# 0 to 92
-# 93 to 185
-# 186 to 278
-# 279 to 372
-# 373 to 466
-# 467 to 560
-# 561 to 653
-# 654 to 747
-

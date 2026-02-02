@@ -14,17 +14,17 @@ class Manager(ABC):
 
 
     def crop_video(self, entry, save_path, ground_truth=False):
-        def group_into_ranges(frames):
+        def group_into_ranges(frames, max_gap=1800): # 1800 frames = 1 minute at 30fps
             if not frames:
                 return []
             frames = sorted(set(frames))
             ranges = []
             start = prev = frames[0]
             for f in frames[1:]:
-                if f == prev + 1:
+                if f <= prev + max_gap:
                     prev = f
                 else:
-                    ranges.append((start, prev + 1))  # ffmpeg uses end-exclusive
+                    ranges.append((start, prev + 1))
                     start = prev = f
             ranges.append((start, prev + 1))
             return ranges
@@ -42,25 +42,21 @@ class Manager(ABC):
             if i == len(positions) - 1:
                 center = positions[i]
                 segments.append((center - 100, center + 100))
-            frame_list = sorted(set(f for s, e in segments for f in range(max(0, s), e + 1)))
+            foi_data = sorted(set(f for s, e in segments for f in range(max(0, s), e + 1)))
         else:
-            frame_list = entry.get("frames_of_interest", [])
-            if entry.get("nsvs", {}).get("output") == [-1]:
-                # Get total frame count
+            foi_data = entry.get("frames_of_interest", [])
+            if not foi_data or foi_data == [-1]:
+                print(f"[Info] No specific interests found for {input_path}, exporting full video.")
                 cap = cv2.VideoCapture(input_path)
-                frame_list = list(range(int(cap.get(cv2.CAP_PROP_FRAME_COUNT))))
+                foi_data = list(range(int(cap.get(cv2.CAP_PROP_FRAME_COUNT))))
                 cap.release()
-            elif frame_list:
-                start, end = min(frame_list), max(frame_list)
-                frame_list = list(range(start, end + 1))
-
-        # Fallback in case frame_list is still empty
-        if not frame_list:
-            cap = cv2.VideoCapture(input_path)
-            frame_list = list(range(int(cap.get(cv2.CAP_PROP_FRAME_COUNT))))
-            cap.release()
-
-        ranges = group_into_ranges(frame_list)
+            
+            if isinstance(foi_data[0], (list, tuple)):
+                # We add +1 to the end because your FFmpeg trim uses end-exclusive logic
+                ranges = [(s, e + 1) for s, e in foi_data]
+            else:
+                # Fallback for any old flat-list data
+                ranges = group_into_ranges(foi_data)
 
         if not ranges:
             print(f"[Warning] No valid ranges for {input_path}, skipping.")

@@ -9,7 +9,7 @@ from nsvqa.puls.puls import *
 from nsvqa.vqa.vqa import vqa
 from nsvqa.vqa.lmm_vqa import lmm_eval_vqa
 from nsvqa.nsvs.vlm.internvl import InternVL
-
+from sentence_transformers import SentenceTransformer
 import json
 import os
 import datetime
@@ -18,6 +18,8 @@ import logging
 
 import time
 from collections import defaultdict
+
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 def aggregate_metrics(raw_results):
     """
@@ -96,6 +98,7 @@ def aggregate_metrics(raw_results):
 def exec_puls(entry, save_dir): # Step 1
     print("PULS is called")
     output = PULS(entry["question"], entry["metadata"]["id"], save_dir=save_dir)
+    # output = {'proposition': ['man_wearing_glasses_dressed_in_black_suit_is_speaking_to_the_camera', 'man_is_under_golden_sky', 'subtitle_of_that_still_uh_in_tanks_and_will_be'], 'specification': '("man_wearing_glasses_dressed_in_black_suit_is_speaking_to_the_camera" & "man_is_under_golden_sky") U "subtitle_of_that_still_uh_in_tanks_and_will_be"', 'saved_path': '/usr/homes/sgl57/NeuS-VLM/NeuS-QA/experiment_results/debug_nsvs//InternVL2-8B/nsvs_qa_T3E_E3E_T3O_O3O_20260130_114413/split_1/llm_conversation_history/mH9LdC7IFH8_0/conversation_history_target_mH9LdC7IFH8_0_20260130_114429.json'}
     entry["puls"] = {}
     entry["puls"]["proposition"] = output["proposition"]
     entry["puls"]["specification"] = output["specification"]
@@ -111,19 +114,20 @@ def exec_target_identification(entry, save_dir): # Step 2
         entry["metadata"]["id"],
         save_dir
     )
-
+    # output = {'frame_window': '[start_time, end_time + 10]', 'explanation': 'Since the question asks about events after the specification and the candidates involve changes in camera views, we include the entire identified window (start_time to end_time) and extend 10 seconds after to ensure we capture the complete transition of camera views.', 'saved_path': '/usr/homes/sgl57/NeuS-VLM/NeuS-QA/experiment_results/debug_nsvs//InternVL2-8B/nsvs_qa_T3E_E3E_T3O_O3O_20260130_114413/split_1/llm_conversation_history/mH9LdC7IFH8_0/conversation_history_target_target_mH9LdC7IFH8_0_20260130_114431.json'}
     entry["target_identification"] = {}
     entry["target_identification"]["frame_window"] = output["frame_window"]
     entry["target_identification"]["explanation"] = output["explanation"]
     entry["target_identification"]["conversation_history"] = os.path.join(os.getcwd(), output["saved_path"])
 
-def exec_nsvs(entry, sample_rate, device, model, vlm, num_of_frame_in_sequence ,measure_metrics): # Step 3
+def exec_nsvs(entry, sample_rate, device, model, clip_model, vlm, measure_metrics): # Step 3
     print(f'NeuS Module is Called {entry["paths"]["video_path"]}')
 
     # 1. Video IO time
     io_start = time.perf_counter() if measure_metrics else 0
-    reader = Mp4Reader(path=entry["paths"]["video_path"], sample_rate=sample_rate)
-    video_data = reader.read_video()
+    
+    video_data = get_relevant_frames_from_video(model=clip_model, video_path=entry["paths"]["video_path"], propositions=entry["puls"]["proposition"], threshold=0.22)
+    
     if measure_metrics: entry["time_metrics"]["video_IO_time"] = time.perf_counter() - io_start
 
     if "metadata" not in entry:
@@ -131,65 +135,75 @@ def exec_nsvs(entry, sample_rate, device, model, vlm, num_of_frame_in_sequence ,
     
     entry["metadata"]["fps"] = video_data["video_info"]["fps"]
     entry["metadata"]["frame_count"] = video_data["video_info"]["frame_count"]
-    entry["metadata"]["num_of_frame_in_sequence"] = num_of_frame_in_sequence
+    # entry["metadata"]["num_of_frame_in_sequence"] = num_of_frame_in_sequence
     try:
-        output, indices, run_metrics = run_nsvs(
+        output, indices, frames_of_interest, run_metrics = run_nsvs(
             video_data,
             entry["paths"]["video_path"],
             entry["puls"]["proposition"],
             entry["puls"]["specification"],
+            entry["target_identification"]["frame_window"],
             device=device,
             model=model,
             vlm=vlm,
-            measure_metrics=measure_metrics,
-            num_of_frame_in_sequence=num_of_frame_in_sequence
+            measure_metrics=measure_metrics
         )
-        print('Exited NSVS')
     except Exception as e:
         entry["metadata"]["error"] = repr(e)
         output = [-1]
         indices = []
         run_metrics = {}
+        frames_of_interest= [-1]
         print(f"DEBUG: run_nsvs failed with: {e}")
-        
-    
+        traceback.print_exc()
     entry["nsvs"] = {}
     entry["nsvs"]["output"] = output
-    entry["nsvs"]["indices"] = indices
+    entry["nsvs"]["indices"] = [list(s) for s in indices]
+    entry["frames_of_interest"] = frames_of_interest
 
     if measure_metrics:
         print(run_metrics)
         for metric, value in run_metrics.items():
             entry["time_metrics"][metric] = value
 
-def exec_merge(entry): # Step 4
-    inner = entry["target_identification"]["frame_window"].strip()[1:-1]
-    parts = inner.split(',')
-    result = []
-    for part in parts:
-        part = part.strip()
-        match = re.search(r'([+-])\s*(\d+)', part)
-        if match:
-            sign, num = match.groups()
-            result.append(int(sign + num))
-        else:
-            result.append(0)
+# def exec_merge(entry): # Step 4
+#     inner = entry["target_identification"]["frame_window"].strip()[1:-1]
+#     parts = inner.split(',')
+#     result = []
+#     for part in parts:
+#         part = part.strip()
+#         match = re.search(r'([+-])\s*(\d+)', part)
+#         if match:
+#             sign, num = match.groups()
+#             result.append(int(sign + num))
+#         else:
+#             result.append(0)
 
-    if entry["nsvs"]["output"] != [-1]:
-        entry["frames_of_interest"] = [
-            max(0,                                  int(entry["nsvs"]["output"][0] + result[0] * entry["metadata"]["fps"])),
-            min(entry["metadata"]["frame_count"]-1, int(entry["nsvs"]["output"][1] + result[1] * entry["metadata"]["fps"]))
-        ]
-    else:
-        entry["frames_of_interest"] = [-1]
+#     if entry["nsvs"]["output"] != [-1]:
+#         entry["frames_of_interest"] = [
+#             max(0,                                  int(entry["nsvs"]["output"][0] + result[0] * entry["metadata"]["fps"])),
+#             min(entry["metadata"]["frame_count"]-1, int(entry["nsvs"]["output"][1] + result[1] * entry["metadata"]["fps"]))
+#         ]
+#     else:
+#         all_ai_indices = [all_ai_indices.extend(list(index_list)) for index_list in entry["nsvs"["indices"]]]
+        
+#         if all_ai_indices:
+#             entry["frames_of_interest"] = [min(all_ai_indices), max(all_ai_indices)]
+#         else:
+#             entry["frames_of_interest"] = [-1]
 
-def run_nsvqa(output_dir, llm_convo_dir, current_split, total_splits, vlm_config, data_dir, data_loader, frame_window = 3, measure_metrics=False):
+def run_nsvqa(output_dir, llm_convo_dir, current_split, total_splits, vlm_config, data_dir, data_loader, measure_metrics=False):
     data = data_loader.load_data()
     print(f'Data Loading Complete! Data Length {len(data)}\nStarting NSVS Module')
     output = []
     starting = (len(data) * (current_split-1)) // total_splits
     ending = (len(data) * current_split) // total_splits
+
     vlm = InternVL(model_name=vlm_config[1], device=vlm_config[0])
+    print("Loading CLIP model to GPU...")
+    clip_model = SentenceTransformer('clip-ViT-B-32', device=f'cuda:{vlm_config[0]}')
+    clip_model.eval() # Set to evaluation mode for speed
+
     for i in range(starting, ending):
         print("\n" + "*"*50 + f" {i}/{len(data)-1} " + "*"*50)
         metrics = {} if measure_metrics else None
@@ -216,7 +230,7 @@ def run_nsvqa(output_dir, llm_convo_dir, current_split, total_splits, vlm_config
         # Note: Ensure exec_nsvs is modified to accept and return per-window timing
         n_start = time.perf_counter() if measure_metrics else 0
         # Pass the pre-initialized vlm here
-        exec_nsvs(entry, sample_rate=1, device=vlm_config[0], model=vlm_config[1], vlm=vlm, num_of_frame_in_sequence=frame_window, measure_metrics=measure_metrics)
+        exec_nsvs(entry, sample_rate=1, device=vlm_config[0], model=vlm_config[1], clip_model=clip_model, vlm=vlm, measure_metrics=measure_metrics)
         if measure_metrics: metrics["NeuS_time"] = time.perf_counter() - n_start
 
         # 5. Finalize Total Time
@@ -225,7 +239,7 @@ def run_nsvqa(output_dir, llm_convo_dir, current_split, total_splits, vlm_config
             for key, value in metrics.items():
                 entry.get("time_metrics", {})[key] = value
 
-        exec_merge(entry)
+        # exec_merge(entry)
         output.append(entry)
         print(f'Neus Complete with question {entry["metadata"]["id"]}')
         print(f'Runtime metrics on {entry["metadata"]["id"]}:\n{entry["time_metrics"]}')
@@ -252,7 +266,7 @@ def main(args):
         
     data_loader = LongVideoBench(dataset_path=args.data_dir, burned_path=args.burned_dir, postprocess_dir=postprocess_dir, categories=args.categories)
 
-    run_nsvqa(output_dir=nsvqa_dir, llm_convo_dir=nsvs_llm_convo_dir, current_split=args.current_split, total_splits=args.total_splits, vlm_config=vlm_config, data_dir=args.data_dir, data_loader=data_loader, frame_window=args.frame_window, measure_metrics=args.measure_metrics)
+    run_nsvqa(output_dir=nsvqa_dir, llm_convo_dir=nsvs_llm_convo_dir, current_split=args.current_split, total_splits=args.total_splits, vlm_config=vlm_config, data_dir=args.data_dir, data_loader=data_loader, measure_metrics=args.measure_metrics)
     # Time PostProcess
     data_loader.postprocess_data(nsvqa_dir, args.measure_metrics)
 
@@ -280,7 +294,6 @@ if __name__ == "__main__":
     parser.add_argument("--current_split", type=int)
     parser.add_argument("--total_splits", type=int)
     parser.add_argument('--categories', nargs='+', type=str)
-    parser.add_argument("--frame_window", type=int, default=3)
     parser.add_argument("--measure_metrics", action='store_true', default = False)
     # parser.add_argument("--use_lmm_evals", action='store_true', default = True)
     # parser.add_argument("--pure_vqa", action='store_true', default = False)
