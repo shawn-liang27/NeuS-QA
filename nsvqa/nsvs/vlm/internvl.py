@@ -335,8 +335,6 @@ class InternVL:
             token = generation_output.sequences[0, logit].item()
             prob = softmax(generation_output.logits[logit])[0, token]
             confidence = prob.item() * confidence
-        self.clear_gpu_memory()
-
         return response, confidence
 
 IMAGENET_MEAN = (0.485, 0.456, 0.406)

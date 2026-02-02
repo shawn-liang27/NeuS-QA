@@ -66,7 +66,7 @@ class LongVideoBench(Manager):
         return [entry for entries in category_buckets.values() for entry in entries]
 
 
-    def postprocess_data(self, nsvs_path, postprocess_dir="", measure_metrics):
+    def postprocess_data(self, nsvs_path, measure_metrics=True, postprocess_dir="", ):
         assert self.postprocess_dir is not None
         self._nsvs_path = nsvs_path
 

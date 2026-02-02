@@ -15,7 +15,7 @@ MAX_TOKEN_LEN=65000
 
 CATEGORIES=("T3E" "E3E" "T3O" "O3O") # "T3E", "E3E", "T3O", "O3O"
 CAT_STR=$(IFS='_'; echo "${CATEGORIES[*]}")
-OUT_DIR="$JOB_DIR/experiment_results/nsvs/"${MODEL//\//_}"/nsvs_qa_${CAT_STR}_${JOB_ID}"
+OUT_DIR="$JOB_DIR/experiment_results/nsvs/comparison_baseline/"${MODEL//\//_}"/nsvs_qa_split1_4_${JOB_ID}"
 
 mkdir -p "$OUT_DIR"
 
@@ -33,7 +33,7 @@ set +a
 # =========================================================
 # CONFIGURATION
 # =========================================================
-TOTAL_SPLITS=8  # Set this to your number of GPUs
+TOTAL_SPLITS=4  # Set this to your number of GPUs
 CURRENT_SPLIT=$1
 GPU=$2
 FRAME_WINDOW=$3
