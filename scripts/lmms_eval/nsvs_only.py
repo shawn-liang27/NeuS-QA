@@ -98,7 +98,7 @@ def aggregate_metrics(raw_results):
 def exec_puls(entry, save_dir): # Step 1
     print("PULS is called")
     output = PULS(entry["question"], entry["metadata"]["id"], save_dir=save_dir)
-    # output = {'proposition': ['man_wearing_glasses_dressed_in_black_suit_is_speaking_to_the_camera', 'man_is_under_golden_sky', 'subtitle_of_that_still_uh_in_tanks_and_will_be'], 'specification': '("man_wearing_glasses_dressed_in_black_suit_is_speaking_to_the_camera" & "man_is_under_golden_sky") U "subtitle_of_that_still_uh_in_tanks_and_will_be"', 'saved_path': '/usr/homes/sgl57/NeuS-VLM/NeuS-QA/experiment_results/debug_nsvs//InternVL2-8B/nsvs_qa_T3E_E3E_T3O_O3O_20260130_114413/split_1/llm_conversation_history/mH9LdC7IFH8_0/conversation_history_target_mH9LdC7IFH8_0_20260130_114429.json'}
+
     entry["puls"] = {}
     entry["puls"]["proposition"] = output["proposition"]
     entry["puls"]["specification"] = output["specification"]
@@ -114,7 +114,7 @@ def exec_target_identification(entry, save_dir): # Step 2
         entry["metadata"]["id"],
         save_dir
     )
-    # output = {'frame_window': '[start_time, end_time + 10]', 'explanation': 'Since the question asks about events after the specification and the candidates involve changes in camera views, we include the entire identified window (start_time to end_time) and extend 10 seconds after to ensure we capture the complete transition of camera views.', 'saved_path': '/usr/homes/sgl57/NeuS-VLM/NeuS-QA/experiment_results/debug_nsvs//InternVL2-8B/nsvs_qa_T3E_E3E_T3O_O3O_20260130_114413/split_1/llm_conversation_history/mH9LdC7IFH8_0/conversation_history_target_target_mH9LdC7IFH8_0_20260130_114431.json'}
+    
     entry["target_identification"] = {}
     entry["target_identification"]["frame_window"] = output["frame_window"]
     entry["target_identification"]["explanation"] = output["explanation"]

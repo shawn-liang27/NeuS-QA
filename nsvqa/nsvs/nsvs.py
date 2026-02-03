@@ -58,7 +58,7 @@ def run_nsvs(
     vlm: str,
     measure_metrics: bool,
     model_type: str = "dtmc",
-    num_of_frame_in_sequence = 5,
+    num_of_frame_in_sequence = 3,
     tl_satisfaction_threshold: float = 0.6,
     detection_threshold: float = 0.5,
     vlm_detection_threshold: float = 0.349,
@@ -83,18 +83,12 @@ def run_nsvs(
 
     def process_frame(sequence_of_frames: list[np.ndarray], current_indices: int, measure_metrics: bool, proposition: list):
         object_of_interest = {}    
-        # Time per VLM proposition detection
-        per_prop_detection_start = time.perf_counter() if measure_metrics else 0
+
         detected_objects = vlm.batch_detect(
             seq_of_frames=sequence_of_frames,
             scene_descriptions=proposition,
             threshold=vlm_detection_threshold
         )
-        if measure_metrics: 
-            per_prop_detection_duration = time.perf_counter() - per_prop_detection_start
-            log_metrics("per_proposition_detection_time", per_prop_detection_duration, True) 
-            nonlocal _vlm_detection_count
-            _vlm_detection_count += 1
 
         for detected_object in detected_objects:
             object_of_interest[detected_object.name] = detected_object      

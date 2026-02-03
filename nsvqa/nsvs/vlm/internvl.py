@@ -33,6 +33,8 @@ class InternVL:
         model_name: str = "InternVL2-8B",
         multi_gpus: bool = False,
         device: int = 0,
+        max_patch: int = 6,
+
     ) -> None:
         """Initialization the InternVL."""
         logging.info(
@@ -53,14 +55,15 @@ class InternVL:
             self._path,
             torch_dtype=torch.bfloat16,
             low_cpu_mem_usage=True,
-            use_flash_attn=False,
-            attn_implementation="eager",
+            use_flash_attn=True,
+            attn_implementation="flash_attention_2",
             trust_remote_code=True,
             device_map=device_map,
         )
         self.model.apply(self.move_tensors_to_gpu)
         self.model.eval()
-        self.model.config.max_dynamic_patch = 12
+        self.max_patch = max_patch
+        self.model.config.max_dynamic_patch = self.max_patch
         logging.info(f"Using dynamic batch {self.model.config.max_dynamic_patch}")
         self.model.apply(self.move_tensors_to_gpu)
         self.tokenizer = AutoTokenizer.from_pretrained(self._path, trust_remote_code=True, use_fast=False)
@@ -185,7 +188,7 @@ class InternVL:
         }
 
         pixel_values, num_patches_list = load_video_from_seq_of_frames(
-            seq_of_frames=seq_of_frames, device=self.device
+            seq_of_frames=seq_of_frames, device=self.device, max_num=self.max_patch
         )
 
         num_questions = len(languages)

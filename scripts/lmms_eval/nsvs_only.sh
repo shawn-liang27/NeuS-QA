@@ -15,7 +15,7 @@ MAX_TOKEN_LEN=65000
 
 CATEGORIES=("T3E" "E3E" "T3O" "O3O") # "T3E", "E3E", "T3O", "O3O"
 CAT_STR=$(IFS='_'; echo "${CATEGORIES[*]}")
-OUT_DIR="$JOB_DIR/experiment_results/nsvs/"${MODEL//\//_}"/nsvs_qa_${CAT_STR}_${JOB_ID}"
+OUT_DIR="$JOB_DIR/experiment_results/nsvs_improved/"${MODEL//\//_}"/actual_batch_prop_plus_clip/nsvs_qa_${CAT_STR}_${JOB_ID}"
 
 mkdir -p "$OUT_DIR"
 
@@ -35,7 +35,6 @@ set +a
 # =========================================================
 TOTAL_SPLITS=8  # Set this to your number of GPUs
 GPU_START=$1
-FRAME_WINDOW=$2
 export CUDA_VISIBLE_DEVICE=0,1,2,3,4,5,6,7
 # =========================================================
 # FUNCTION: Worker Logic (Runs in Parallel)
@@ -59,7 +58,6 @@ launch_worker() {
         --current_split "${SPLIT_ID}" \
         --total_splits "${TOTAL_SPLITS}" \
         --categories "${CATEGORIES[@]}" \
-        --frame_window ${FRAME_WINDOW} \
         --measure_metrics > "${WORKER_LOG}_eval.out" 2>&1
 
     local PY_EXIT=$?

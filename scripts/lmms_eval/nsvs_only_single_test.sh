@@ -15,7 +15,7 @@ MAX_TOKEN_LEN=65000
 
 CATEGORIES=("T3E" "E3E" "T3O" "O3O") # "T3E", "E3E", "T3O", "O3O"
 CAT_STR=$(IFS='_'; echo "${CATEGORIES[*]}")
-OUT_DIR="$JOB_DIR/experiment_results/nsvs_improved/"${MODEL//\//_}"/nsvs_qa_${CAT_STR}_${JOB_ID}"
+OUT_DIR="$JOB_DIR/experiment_results/debug_nsvs/"${MODEL//\//_}"/nsvs_qa_${CAT_STR}_${JOB_ID}"
 
 mkdir -p "$OUT_DIR"
 
@@ -33,10 +33,10 @@ set +a
 # =========================================================
 # CONFIGURATION
 # =========================================================
-TOTAL_SPLITS=8  # Set this to your number of GPUs
+TOTAL_SPLITS=306  # Set this to your number of GPUs
 CURRENT_SPLIT=$1
 GPU=$2
-export CUDA_LAUNCH_BLOCKING=1
+
 # =========================================================
 # FUNCTION: Worker Logic (Runs in Parallel)
 # =========================================================
