@@ -58,7 +58,7 @@ def run_nsvs(
     vlm: str,
     measure_metrics: bool,
     model_type: str = "dtmc",
-    num_of_frame_in_sequence = 3,
+    num_of_frame_in_sequence = 5,
     tl_satisfaction_threshold: float = 0.6,
     detection_threshold: float = 0.5,
     vlm_detection_threshold: float = 0.349,
@@ -243,7 +243,8 @@ def run_nsvs(
         # Get either AI hits or CLIP indices
         source_indices = sorted(list(set().union(*all_detections)))
         if not source_indices:
-            source_indices = sorted(list(video_data.get("original_indices", [])))
+            raw_indices = video_data.get("original_indices", [])
+            source_indices = sorted([int(x) for x in raw_indices])
 
         if source_indices:
             # group_with_gaps returns lists of frames; we convert to (min, max)

@@ -235,7 +235,6 @@ class InternVL:
             query = template.get_prompt()
 
             num_images_this_question = query.count('<image>')
-            # Only use the first N patches for this question
             for _ in range(num_images_this_question):
                 num_patches = num_patches_list[total_patches_idx]
                 context_tokens = IMG_CONTEXT_TOKEN * self.model.num_image_token * num_patches

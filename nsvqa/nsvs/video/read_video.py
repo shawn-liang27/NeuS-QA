@@ -130,12 +130,13 @@ import tqdm
 from decord import VideoReader, cpu
 from sentence_transformers import util
 from PIL import Image
+import logging
 
 def get_relevant_frames_from_video(model, video_path, propositions, 
-                               threshold=0.22, sample_rate= 1, top_k=200, 
+                               threshold=0.23, sample_rate= 1, top_k=200, 
                                merge_threshold_sec=3.0,
                                window_padding = 1.0, 
-                               max_frames_per_segment=50):
+                               max_frames_per_segment=50, uniform_sample_size_limit=300):
     """
     Refined Pipeline:
     1. Coarse CLIP Scan.
@@ -147,9 +148,25 @@ def get_relevant_frames_from_video(model, video_path, propositions,
     fps, frame_count = vr.get_avg_fps(), len(vr)
     duration_total = frame_count / fps
 
+    expected_uniform_count = int(duration_total * sample_rate)
+    
+    if expected_uniform_count <= uniform_sample_size_limit:
+        logging.info(f"[DEBUG] Video {video_path} is within budget ({expected_uniform_count} frames). Using Uniform Sampling.")
+        # Uniform sampling logic
+        step = int(max(1, fps / sample_rate))
+        indices = list(range(0, frame_count, step))
+        frames = vr.get_batch(indices).asnumpy()
+        return {
+            "images": [f for f in frames],
+            "original_indices": indices,
+            "video_info": {"fps": fps, "frame_count": frame_count, "sample_rate": sample_rate}
+        }
+
+    # --- TIER 2: CLIP RELEVANCE PIPELINE (For Long Videos) ---
+    logging.info(f"[DEBUG] Video {video_path} exceeds budget. Initiating CLIP filtering.")
+
     # --- 1. COARSE SCAN (0.5 FPS) ---
     CLIP_SCAN_HZ = 0.5
-    UNIFORM_TOTAL_FRAMES=210
     scan_step = int(max(1, fps / CLIP_SCAN_HZ))
     coarse_indices = list(range(0, frame_count, scan_step))
     coarse_frames = vr.get_batch(coarse_indices).asnumpy()
@@ -180,21 +197,23 @@ def get_relevant_frames_from_video(model, video_path, propositions,
     top_anchors = frame_scores[:top_k]
 
     if not top_anchors:
-        print(f"[DEBUG] Zero hits at {threshold}. Falling back to Top-50 anchors above 0.18.")
-        top_anchors = [s for s in frame_scores if s["score"] >= 0.18][:top_k]
-
-    if not top_anchors:
-        print("[WARNING] Total CLIP failure. Using 0.1 FPS Global Fallback.")
+        logging.info(f"[WARNING] Zero hits at {threshold}. Falling back to Top-50 anchors above 0.18.")
+        top_anchors = [s for s in frame_scores if s["score"] >= thresh-0.03][:top_k]
         
     if not top_anchors:
         logging.info("[WARNING] CLIP Relevant Search Speedup Failed, Switching Back to Uniform Sampling")
-        indices = np.linspace(0, frame_count - 1, num=UNIFORM_TOTAL_FRAMES, dtype=int)    
+        uniform_sample_count = int(duration_total * sample_rate)
+
+        if uniform_sample_count > uniform_sample_size_limit:
+            logging.info(f"[WARNING] Video {video_path} is within budget ({uniform_sample_count} frames). Using Uniform Sampling.")
+            uniform_sample_count = uniform_sample_size_limit
+
+        indices = np.linspace(0, frame_count - 1, num=uniform_sample_size_limit, dtype=int)    
         frames = vr.get_batch(indices).asnumpy()
         return {
             "images": frames,
             "original_indices": indices,
-            "sample_rate" : sample_rate,
-            "video_info": {"fps": fps, "frame_count": frame_count}
+            "video_info": {"fps": fps, "frame_count": frame_count, "sample_rate" : sample_rate}
         }
 
     # Convert anchors to time-windows (1s padding each side)
@@ -203,7 +222,7 @@ def get_relevant_frames_from_video(model, video_path, propositions,
         t = anchor["idx"] / fps
         raw_segments.append([max(0, t - window_padding), min(duration_total, t + window_padding)])
 
-    print(f'[DEBUG] Number of Frames Kept by CLIP: {raw_segments}\nLength: {len(raw_segments)}')
+    logging.info(f'[DEBUG] Number of Frames Kept by CLIP: {raw_segments}\nLength: {len(raw_segments)}')
     # --- 3. GRACEFUL MERGING ---
     # Merge segments that are within x seconds of each other to create continuous 'scenes'
     raw_segments.sort(key=lambda x: x[0])
@@ -218,7 +237,7 @@ def get_relevant_frames_from_video(model, video_path, propositions,
                 curr_s, curr_e = next_s, next_e
         merged.append([curr_s, curr_e])
 
-    print(f'[DEBUG] Final CLIP Video Segments Chosen: {merged}')
+    logging.info(f'[DEBUG] Final CLIP Video Segments Chosen: {merged}')
 
     # --- 4. ADAPTIVE SAMPLING ---
     # We use a non-linear (sqrt) growth to prevent long segments from exploding in frame count.
@@ -248,9 +267,9 @@ def get_relevant_frames_from_video(model, video_path, propositions,
     # Final chronological sort and retrieval
     final_indices = sorted(list(set(final_indices)))
     flat_frames = vr.get_batch(final_indices).asnumpy()
-    print(f'CLIP Complete!\nRetained Indices: {final_indices}\nLength: {len(final_indices)}')
+    logging.info(f'[DEBUG] CLIP Complete!\nRetained Indices: {final_indices}\nLength: {len(final_indices)}')
     return {
         "images": [f for f in flat_frames],
         "original_indices": final_indices,
-        "video_info": {"fps": fps, "frame_count": frame_count}
+        "video_info": {"fps": fps, "frame_count": frame_count, "sample_rate" : sample_rate}
     }
