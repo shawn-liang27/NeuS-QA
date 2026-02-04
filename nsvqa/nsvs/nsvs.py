@@ -168,7 +168,6 @@ def run_nsvs(
 
     automaton_foi = frame_of_interest.compile_foi()
     if PRINT_ALL:
-        print()
         print(f"Automaton indices: {automaton_foi}")
 
     # if not automaton_foi or not any(len(x) > 0 for x in all_detections):
@@ -186,11 +185,12 @@ def run_nsvs(
         else:
             foi = [min(foi), max(foi)]
 
-        if PRINT_ALL:
+        if True:
             print("\n" + "-"*107)
+            print(f"Automaton_foi: {automaton_foi}")
             print(f"All Detections: {all_detections}")
-            print("Detected frames of interest:")
-            print(foi)
+            print(f"Detected frames of interest: {detections_foi}")
+            print(f"Merged Frames of Interests: {foi}")
 
     if measure_metrics:
         log_metrics("num_model_checks", _model_check_count)

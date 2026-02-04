@@ -24,9 +24,11 @@ def process_specification(specification, propositions):
         key=lambda x: len(x[0]),
         reverse=True
     )
+    matched_count = 0
     for original, new in replacements:
         if specification.count(original) == 1:
             specification = specification.replace(original, f'"{new}"')
+            matched_count += 1
 
     replacements = {
         "AND": "&",
@@ -34,7 +36,8 @@ def process_specification(specification, propositions):
         "UNTIL": "U",
         "ALWAYS": "G",
         "EVENTUALLY": "F",
-        "NOT": "!"
+        "NOT": "!",
+        "NEXT": "X"
     }
     for word, symbol in replacements.items():
         specification = specification.replace(word, symbol)
@@ -42,6 +45,13 @@ def process_specification(specification, propositions):
     # specification = specification.replace("U", "& F")
     # if 'G "' in specification:
     #     specification = specification.replace('G "', 'F "')
+    found_props = re.findall(r'"([^"]*)"', specification)
+    is_invalid = any(p not in new_propositions for p in found_props) or (matched_count == 0)
+
+    if is_invalid:
+        # Default to AND (conjunction) of all valid propositions
+        # Change "&" to "|" here if you prefer an OR-based fallback
+        specification = " & ".join([f'"{p}"' for p in new_propositions])
 
     return new_propositions, specification
 
@@ -51,17 +61,20 @@ def PULS(prompt, id, save_dir, openai_key=None):
     save_dir = os.path.join(save_dir, id)
     os.makedirs(save_dir, exist_ok=True)
     llm = LLM(save_dir=save_dir)
-
-    full_prompt = find_prompt(prompt)
-    llm_output = llm.prompt(full_prompt)
-    parsed = clean_and_parse_json(llm_output)
+    
+    raw_results = llm.run_puls(prompt)
 
     final_output = {}
 
-    cleaned_props, processed_spec = process_specification(parsed["specification"], parsed["proposition"])
-    final_output["proposition"] = cleaned_props
-    final_output["specification"] = processed_spec
+    cleaned_props, processed_spec = process_specification(
+        raw_results["specification"], 
+        raw_results["proposition"]
+    )
 
+    final_output = {
+        "proposition": cleaned_props,
+        "specification": processed_spec
+    }
     saved_path = llm.save_history(id)
     final_output["saved_path"] = saved_path
 

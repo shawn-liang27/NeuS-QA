@@ -15,7 +15,7 @@ MAX_TOKEN_LEN=65000
 
 CATEGORIES=("T3E" "E3E" "T3O" "O3O") # "T3E", "E3E", "T3O", "O3O"
 CAT_STR=$(IFS='_'; echo "${CATEGORIES[*]}")
-OUT_DIR="$JOB_DIR/experiment_results/nsvs/"${MODEL//\//_}"/nsvs_qa_${CAT_STR}_${JOB_ID}"
+OUT_DIR="$JOB_DIR/experiment_results/nsvs/naive_neus_baseline/"${MODEL//\//_}"/nsvs_qa_${CAT_STR}_${JOB_ID}"
 
 mkdir -p "$OUT_DIR"
 

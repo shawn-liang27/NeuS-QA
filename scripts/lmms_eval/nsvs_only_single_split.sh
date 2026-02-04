@@ -33,7 +33,7 @@ set +a
 # =========================================================
 # CONFIGURATION
 # =========================================================
-TOTAL_SPLITS=4  # Set this to your number of GPUs
+TOTAL_SPLITS=306  # Set this to your number of GPUs
 CURRENT_SPLIT=$1
 GPU=$2
 FRAME_WINDOW=$3
