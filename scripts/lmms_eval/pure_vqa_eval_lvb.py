@@ -7,7 +7,6 @@ from nsvqa.vqa.pure_vqa import *
 from nsvqa.datamanager.longvideobench import *
 from nsvqa.vqa.lmm_vqa import lmm_eval_vqa
 
-# def main(experiment_dir, vlm_config, data_dir, burned_dir, categories, current_split, total_splits, max_num_frames):
 def main(args):
 
     experiment_dir = f'{args.output_dir}/vqa_output'

@@ -78,28 +78,7 @@ launch_worker() {
     echo ">>> [Worker $SPLIT_ID] Finished (Exit Code: $PY_EXIT) in ${HOURS}h ${MINS}m ${SECS}s. Stopping server..." >> "${WORKER_LOG}_eval.out"
 }
 
-# =========================================================
-# MAIN LOOP: Spawn Workers
-# =========================================================
-
-# export CUDA_LAUNCH_BLOCKING=1
-# export PYTHONUNBUFFERED=1
-# export TORCH_SHOW_CPP_STACKTRACES=1
-# export TORCH_DISABLE_ADDR2LINE=1
-
 trap 'echo ">>> Killing all workers..."; kill $(jobs -p); exit' SIGINT SIGTERM
-
-# for (( i=1; i<=TOTAL_SPLITS; i++ ))
-# do
-#     # Calculate GPU ID (0-based) from Split ID (1-based)
-#     GPU_ID=$(($GPU_START + (i-1)))
-    
-#     # Launch function in background
-#     launch_worker $MODEL $i $GPU_ID &
-    
-#     # Small sleep to prevent all 4 servers from spiking CPU/Disk at the exact same millisecond
-#     sleep 5
-# done
 
 launch_worker $MODEL $CURRENT_SPLIT $GPU &
 

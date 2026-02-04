@@ -18,13 +18,6 @@ import traceback
 
 logging.basicConfig(level=logging.INFO)
 
-
-# Set the library-wide logging level to DEBUG
-# transformers.utils.logging.set_verbosity_debug()
-
-# # Optional: specifically target the internvl-chat components if you have the source
-# logging.getLogger("transformers").setLevel(logging.DEBUG)
-
 class InternVL:
     """InternVL's Vision Language Model."""
 
@@ -192,8 +185,6 @@ class InternVL:
         )
 
         num_questions = len(languages)
-        # New shape will be [Total_Patches * num_questions, Channel, H, W]
-        # batch_pixel_values = torch.cat([pixel_values] * num_questions, dim=0).to(dtype=torch.bfloat16, device=self.device)
 
         batch_num_patches_list = num_patches_list * num_questions
 
@@ -275,12 +266,6 @@ class InternVL:
         expanded_features = visual_block.expand(batch_size, -1, -1).contiguous()
 
         try:     
-            # generation_output = self.model.generate(
-            #     pixel_values=pixel_values.to(self.model.dtype), # Ensure dtype match
-            #     input_ids=input_ids,
-            #     attention_mask=attention_mask,
-            #     **generation_config
-            # )
             generation_output = self.model.generate(
                 pixel_values=pixel_values[0:1], # Passes a single image's worth of pixel data
                 visual_features=expanded_features, # Passes the 10-batch of features
@@ -313,7 +298,7 @@ class InternVL:
                 token_id = item_tokens[step_idx].item()
                 
                 # Stop probability calculation at EOS or Separator
-                if token_id == tokenizer.eos_token_id or token_id == 92542:
+                if token_id == tokenizer.eos_token_id:
                     break
                     
                 logits = generation_output.scores[step_idx][b]
@@ -326,8 +311,6 @@ class InternVL:
                 batch_confidences.append(float(conf))
             else:
                 batch_confidences.append(0.0)
-        # print(f'DEBUG Responses {responses}')
-        # print(f'DEBUG batch_confidences {batch_confidences}')
         return responses, batch_confidences
 
 IMAGENET_MEAN = (0.485, 0.456, 0.406)

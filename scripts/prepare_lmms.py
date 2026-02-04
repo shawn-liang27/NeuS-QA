@@ -9,7 +9,7 @@ def main(args):
     nsvs_path = args.nsvs_path
     logging_path = args.logging_path
     lmms_path = os.path.join(logging_path, "lmms")
-    postprocess_path_list = steps = [os.path.join(nsvs_path, f'split_{i}', 'postprocess_output') for i in range(1, 5)]
+    postprocess_path_list = steps = [os.path.join(nsvs_path, f'split_{i}', 'postprocess_output') for i in range(1, args.num_split + 1)]
     print(postprocess_path_list)
     os.makedirs(lmms_path, exist_ok=True)
     original_output_path = os.path.join(lmms_path, "original")
@@ -116,5 +116,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--logging_path")
     parser.add_argument("--nsvs_path")
+    parser.add_argument("--num_split", type=int)
     args = parser.parse_args()
     main(args)

@@ -12,13 +12,6 @@ class VideoFrame:
     ):
         self.frame_idx_list = frame_idx_list
         self.object_of_interest = object_of_interest
-        # self.frame_images = frame_images
-
-    # def save_frame_img(self, save_path: str) -> None:
-    #     """Save frame image."""
-    #     if self.frame_images is not None:
-    #         for idx, img in enumerate(self.frame_images):
-    #             cv2.imwrite(f"{save_path}_{idx}.png", cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
 
     def thresholded_detected_objects(self, threshold) -> dict:
         """Get all detected object."""

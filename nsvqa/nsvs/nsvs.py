@@ -277,15 +277,14 @@ def run_nsvs(
                     curr_start, curr_end = next_start, next_end
             merged.append((curr_start, curr_end))
 
-        # Return list of tuples: [(100, 500), (1200, 1500)]
-
-    if True:
+    if PRINT_ALL:
         print("\n" + "-"*107)
         print(f"Automaton_foi {automaton_foi}")
         print(f"All Detections: {all_detections}")
         print("Detected frames of interest:")
         print(foi)
-        print(f"Merged Frames of Interests: {merged}")
+
+    logging.info(f"Merged Frames of Interests: {merged}")
 
     if measure_metrics:
         log_metrics("num_model_checks", _model_check_count)

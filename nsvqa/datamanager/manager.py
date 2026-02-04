@@ -31,7 +31,6 @@ class Manager(ABC):
 
         input_path = entry["paths"]["video_path"]
 
-        # Step 1: Determine frames to keep
         if ground_truth:
             positions = entry["metadata"]["position"]
             segments = []
@@ -52,17 +51,14 @@ class Manager(ABC):
                 cap.release()
             
             if isinstance(foi_data[0], (list, tuple)):
-                # We add +1 to the end because your FFmpeg trim uses end-exclusive logic
                 ranges = [(s, e + 1) for s, e in foi_data]
             else:
-                # Fallback for any old flat-list data
                 ranges = group_into_ranges(foi_data)
 
         if not ranges:
             print(f"[Warning] No valid ranges for {input_path}, skipping.")
             return
 
-        # Build filter_complex and output map
         filters = []
         labels = []
         for i, (start, end) in enumerate(ranges):

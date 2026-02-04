@@ -166,32 +166,6 @@ def exec_nsvs(entry, sample_rate, device, model, clip_model, vlm, measure_metric
         for metric, value in run_metrics.items():
             entry["time_metrics"][metric] = value
 
-# def exec_merge(entry): # Step 4
-#     inner = entry["target_identification"]["frame_window"].strip()[1:-1]
-#     parts = inner.split(',')
-#     result = []
-#     for part in parts:
-#         part = part.strip()
-#         match = re.search(r'([+-])\s*(\d+)', part)
-#         if match:
-#             sign, num = match.groups()
-#             result.append(int(sign + num))
-#         else:
-#             result.append(0)
-
-#     if entry["nsvs"]["output"] != [-1]:
-#         entry["frames_of_interest"] = [
-#             max(0,                                  int(entry["nsvs"]["output"][0] + result[0] * entry["metadata"]["fps"])),
-#             min(entry["metadata"]["frame_count"]-1, int(entry["nsvs"]["output"][1] + result[1] * entry["metadata"]["fps"]))
-#         ]
-#     else:
-#         all_ai_indices = [all_ai_indices.extend(list(index_list)) for index_list in entry["nsvs"["indices"]]]
-        
-#         if all_ai_indices:
-#             entry["frames_of_interest"] = [min(all_ai_indices), max(all_ai_indices)]
-#         else:
-#             entry["frames_of_interest"] = [-1]
-
 def run_nsvqa(output_dir, llm_convo_dir, current_split, total_splits, vlm_config, data_dir, data_loader, measure_metrics=False):
     data = data_loader.load_data()
     print(f'Data Loading Complete! Data Length {len(data)}\nStarting NSVS Module')
@@ -202,7 +176,7 @@ def run_nsvqa(output_dir, llm_convo_dir, current_split, total_splits, vlm_config
     vlm = InternVL(model_name=vlm_config[1], device=vlm_config[0])
     print("Loading CLIP model to GPU...")
     clip_model = SentenceTransformer('clip-ViT-B-32', device=f'cuda:{vlm_config[0]}')
-    clip_model.eval() # Set to evaluation mode for speed
+    clip_model.eval()
 
     for i in range(starting, ending):
         print("\n" + "*"*50 + f" {i}/{len(data)-1} " + "*"*50)
@@ -227,7 +201,6 @@ def run_nsvqa(output_dir, llm_convo_dir, current_split, total_splits, vlm_config
         if measure_metrics: metrics["Target_ID_time"] = time.perf_counter() - tid_start
 
         # 4. Module: NSVS (The primary bottleneck)
-        # Note: Ensure exec_nsvs is modified to accept and return per-window timing
         n_start = time.perf_counter() if measure_metrics else 0
         # Pass the pre-initialized vlm here
         exec_nsvs(entry, sample_rate=1, device=vlm_config[0], model=vlm_config[1], clip_model=clip_model, vlm=vlm, measure_metrics=measure_metrics)
@@ -239,14 +212,18 @@ def run_nsvqa(output_dir, llm_convo_dir, current_split, total_splits, vlm_config
             for key, value in metrics.items():
                 entry.get("time_metrics", {})[key] = value
 
-        # exec_merge(entry)
         output.append(entry)
         print(f'Neus Complete with question {entry["metadata"]["id"]}')
         print(f'Runtime metrics on {entry["metadata"]["id"]}:\n{entry["time_metrics"]}')
+        
+        vlm.clear_gpu_memory()
+
     with open(output_dir, "w") as f:
         json.dump(output, f, indent=4)
 
-def main(args):
+    
+
+def main(args): 
     vlm_config = (args.port_number, args.vlm_model_name) # device_number, model_name
 
     experiment_dir = args.output_dir
@@ -295,22 +272,7 @@ if __name__ == "__main__":
     parser.add_argument("--total_splits", type=int)
     parser.add_argument('--categories', nargs='+', type=str)
     parser.add_argument("--measure_metrics", action='store_true', default = False)
-    # parser.add_argument("--use_lmm_evals", action='store_true', default = True)
-    # parser.add_argument("--pure_vqa", action='store_true', default = False)
-    # parser.add_argument("--max_num_frames", type=int, default = 32)
-
     
     args = parser.parse_args()
-    
-    # experiment_dir = args.output_dir
-    # os.makedirs(experiment_dir, exist_ok=True)
-    # os.makedirs(f'{experiment_dir}/nsvqa_output', exist_ok=True)
-    # os.makedirs(f'{experiment_dir}/vqa_output', exist_ok=True)
-    # os.makedirs(f'{experiment_dir}/postprocess_output', exist_ok=True)
-
-    # vlm_config = (args.port_number, args.vlm_model_name) # device_number, model_name
-
-    # main(experiment_dir, vlm_config, args.data_dir, args.burned_dir, args.categories, args.current_split, args.total_splits)
-    
     main(args)
 

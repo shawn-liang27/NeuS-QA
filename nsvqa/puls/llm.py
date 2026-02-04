@@ -17,27 +17,10 @@ class LLM:
         if save_dir:
             os.makedirs(save_dir, exist_ok=True)
 
-    def prompt(self, p):
-        """Send a prompt to the LM and update conversation history"""
-        user_message = {"role": "user", "content": [{"type": "text", "text": p}]}
-        self.history.append(user_message)
-
-        response = self.client.chat.completions.create(
-            model=self.model,
-            messages=self.history,
-            store=False,
-        )
-        assistant_response = response.choices[0].message.content
-        assistant_message = {"role": "assistant", "content": [{"type": "text", "text": assistant_response}]}
-        self.history.append(assistant_message)
-
-        return assistant_response
-
     def run_puls(self, question):
         """Executes the two-stage PULS chain with matching few-shot styles."""
         # --- STAGE 1: Extraction ---
         self.history = [{"role": "system", "content": PROPOSITION_EXTRACTOR_SYSTEM}]
-        # Format input to match examples
         prop_query = f"Question: \"{question}\""
         prop_res = self.prompt(prop_query)
         
@@ -47,10 +30,9 @@ class LLM:
         except:
             propositions = ["scene appears"]
 
-        # --- STAGE 2: Logic Generation ---
+        # --- STAGE 2: Specification Generation ---
         self.history.append({"role": "system", "content": TL_GENERATOR_SYSTEM})
         
-        # STYLE MATCHING: Format this string exactly like the 'EXAMPLES' above
         spec_query = f"Question: \"{question}\" | Props: {propositions}"
         spec_res = self.prompt(spec_query)
         

@@ -80,12 +80,6 @@ launch_worker() {
 # =========================================================
 # MAIN LOOP: Spawn Workers
 # =========================================================
-
-# export CUDA_LAUNCH_BLOCKING=1
-# export PYTHONUNBUFFERED=1
-# export TORCH_SHOW_CPP_STACKTRACES=1
-# export TORCH_DISABLE_ADDR2LINE=1
-
 trap 'echo ">>> Killing all workers..."; kill $(jobs -p); exit' SIGINT SIGTERM
 
 for (( i=1; i<=TOTAL_SPLITS; i++ ))

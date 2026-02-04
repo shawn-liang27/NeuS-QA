@@ -32,13 +32,12 @@ class LongVideoBench(Manager):
         self._burned_path = burned_path
         if postprocess_dir:
             self.postprocess_dir = postprocess_dir
-        # self._categories = ["S2E", "S2O", "S2A", "E2O", "T2A", "T2E", "T2O", "O2E", "SSS", "TAA", "E3E", "SAA", "T3O", "TOS", "O3O", "SOS", "T3E"]
         if not isinstance(categories, list):
             self._categories = [categories]
         else:
             self._categories = categories
             
-        self.read_number = read_number # max reads per category
+        self.read_number = read_number
 
     def load_data(self):
         category_buckets = defaultdict(list)
@@ -83,7 +82,7 @@ class LongVideoBench(Manager):
         return [entry for entries in category_buckets.values() for entry in entries]
 
 
-    def postprocess_data(self, nsvs_path, postprocess_dir="", measure_metrics=False):
+    def postprocess_data(self, nsvs_path, measure_metrics=False):
         assert self.postprocess_dir is not None
         self._nsvs_path = nsvs_path
 
@@ -115,7 +114,7 @@ class LongVideoBench(Manager):
                 if success:
                     if measure_metrics:
                         # Initialize time_metrics if it doesn't exist
-                        entry.setdefault("time_metrics", {})["cropping_video"] = duration
+                        entry.setdefault("time_metrics", {})["cropping_video_time"] = duration
                     output.append(entry)
 
         # 4. Save results
