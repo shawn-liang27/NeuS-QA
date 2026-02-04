@@ -51,17 +51,20 @@ def PULS(prompt, id, save_dir, openai_key=None):
     save_dir = os.path.join(save_dir, id)
     os.makedirs(save_dir, exist_ok=True)
     llm = LLM(save_dir=save_dir)
-
-    full_prompt = find_prompt(prompt)
-    llm_output = llm.prompt(full_prompt)
-    parsed = clean_and_parse_json(llm_output)
+    
+    raw_results = llm.run_puls(prompt)
 
     final_output = {}
 
-    cleaned_props, processed_spec = process_specification(parsed["specification"], parsed["proposition"])
-    final_output["proposition"] = cleaned_props
-    final_output["specification"] = processed_spec
+    cleaned_props, processed_spec = process_specification(
+        raw_results["specification"], 
+        raw_results["proposition"]
+    )
 
+    final_output = {
+        "proposition": cleaned_props,
+        "specification": processed_spec
+    }
     saved_path = llm.save_history(id)
     final_output["saved_path"] = saved_path
 

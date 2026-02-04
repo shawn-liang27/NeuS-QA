@@ -77,3 +77,77 @@ Expected Output (only output the following JSON structure — nothing else):
 """
     return full_prompt
 
+PROPOSITION_EXTRACTOR_SYSTEM = """
+You are a Video Logic Parser. Extract atomic visual propositions from the user's question.
+
+### RULES:
+1. Extract object-action or object-object relationships.
+2. SUBTITLES: Use format `subtitle_'TEXT'`. Do NOT add words like "appears" or "says".
+3. NO AMBIGUITY: Omit phrases like "someone doing something".
+4. SAFETY FALLBACK: NEVER return an empty list. If the question is about a simple subject (e.g., "Who is..."), extract the subject as a proposition: ["person appears"].
+
+### EXAMPLES:
+Question: "Who is the first person to appear?" 
+-> {"proposition": ["person appears"]}
+
+Question: "What happens after the man gets up?" 
+-> {"proposition": ["man gets up"]}
+
+Question: "What did the anchor say before the caption 'Climate'?" 
+-> {"proposition": ["anchor speaks", "subtitle_'Climate'"]}
+
+### OUTPUT:
+Return ONLY a JSON object with the key "proposition".
+"""
+
+TL_GENERATOR_SYSTEM = """
+You are a Logic Reasoning Agent. Convert the provided propositions into a Temporal Logic (TL) formula.
+
+### LOGIC RULES:
+1. Operators: Use ONLY [AND, OR, NOT, UNTIL].
+2. usage: Use EVERY provided proposition exactly once.
+3. PARENTHESIS HIERARCHY:
+   - Atomic unit: Every proposition must be wrapped in parentheses: (prop)
+   - Binary Operations: Group two parts as (A OP B).
+   - Complex nesting: Use nested brackets to avoid ambiguity: ((A AND B) UNTIL C).
+
+### EXAMPLES:
+Question: "Who is the first person?" | Props: ["person appears"] 
+-> {"specification": "(person appears)"}
+
+Question: "What happened before the cat jumped?" | Props: ["cat jumps", "man watches"] 
+-> {"specification": "((man watches) UNTIL (cat jumps))"}
+
+Question: "Was he running or walking before he fell?" | Props: ["he runs", "he walks", "he falls"] 
+-> {"specification": "(((he runs) OR (he walks)) UNTIL (he falls))"}
+
+### OUTPUT:
+Return ONLY a JSON object with the key "specification".
+"""
+
+def find_proposition_prompt(prompt):
+    return f"""
+<role>
+You are a Video Logic Parser. Your goal is to extract atomic visual propositions from a natural language question.
+</role>
+
+<constraints>
+1. Propositions must be "subject-action" or "subject-attribute" strings.
+2. If the question is about a single entity, the proposition is "[entity] appears".
+3. NEVER return an empty list.
+4. OUTPUT ONLY THE JSON. NO PROSE.
+</constraints>
+
+<examples>
+Q: "Who is the first person to appear?"
+A: {{"proposition": ["person appears"]}}
+---
+Q: "What happened after the man sat down?"
+A: {{"proposition": ["man sits down"]}}
+</examples>
+
+<task>
+Q: "{prompt}"
+A: 
+"""
+

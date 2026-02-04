@@ -98,7 +98,7 @@ def aggregate_metrics(raw_results):
 def exec_puls(entry, save_dir): # Step 1
     print("PULS is called")
     output = PULS(entry["question"], entry["metadata"]["id"], save_dir=save_dir)
-
+    print(f'[DEBUG] PULS Output: {output}' )
     entry["puls"] = {}
     entry["puls"]["proposition"] = output["proposition"]
     entry["puls"]["specification"] = output["specification"]
@@ -114,7 +114,7 @@ def exec_target_identification(entry, save_dir): # Step 2
         entry["metadata"]["id"],
         save_dir
     )
-    
+    print(f'[DEBUG] Target ID Output: {output}' )
     entry["target_identification"] = {}
     entry["target_identification"]["frame_window"] = output["frame_window"]
     entry["target_identification"]["explanation"] = output["explanation"]
