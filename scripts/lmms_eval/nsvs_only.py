@@ -118,7 +118,7 @@ def exec_target_identification(entry, save_dir): # Step 2
     entry["target_identification"]["conversation_history"] = os.path.join(os.getcwd(), output["saved_path"])
 
 def exec_nsvs(entry, sample_rate, device, model, vlm, num_of_frame_in_sequence ,measure_metrics): # Step 3
-    print(f'NeuS Module is Called {entry["paths"]["video_path"]}')
+    logging.info(f'[DEBUG] NeuS Module is Called on question: {entry["metadata"]["id"]}\nPath:{entry["paths"]["video_path"]} Num: {entry["paths"]["video_path"]}\nPropositions:{entry["puls"]["proposition"]}\nSpecification: {entry["puls"]["specification"]}')
 
     # 1. Video IO time
     io_start = time.perf_counter() if measure_metrics else 0

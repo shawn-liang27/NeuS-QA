@@ -53,8 +53,7 @@ class InternVL:
             attn_implementation="flash_attention_2",
             trust_remote_code=True,
             device_map=device_map,
-        )
-        self.model.eval()
+        ).eval()
         self.max_patch = max_patch
         self.model.config.max_dynamic_patch = self.max_patch
         logging.info(f"Using dynamic batch {self.model.config.max_dynamic_patch}")
@@ -178,7 +177,7 @@ class InternVL:
         }
 
         pixel_values, num_patches_list = load_video_from_seq_of_frames(
-            seq_of_frames=seq_of_frames, device=self.device, max_num=self.max_patch
+            seq_of_frames=seq_of_frames, device=self.device, max_num=1
         )
 
         video_prefix = "".join([f"Frame{i+1}: <image>\n" for i in range(len(num_patches_list))])
@@ -299,30 +298,6 @@ class InternVL:
     
         response = tokenizer.batch_decode(generation_output.sequences, skip_special_tokens=True)[0]
         response = response.split(template.sep)[0].strip()
-
-        # try:
-        #     input_token_len = input_ids.shape[1]
-        #     generated_tokens = generation_output.sequences[0, input_token_len:]
-            
-        #     confidence = 1.0
-        #     for i, token_id in enumerate(generated_tokens):
-        #         if token_id == eos_token_id:
-        #             break
-                
-        #         # Check if we have a score for this step
-        #         if i < len(generation_output.scores):
-        #             # scores[i] is [batch_size, vocab_size]
-        #             step_logits = generation_output.scores[i]
-        #             probs = torch.softmax(step_logits, dim=-1)
-        #             prob = probs[0, token_id].item()
-        #             confidence *= prob
-
-        # except Exception as e:
-        #     logging.warning(f"Confidence calc failed: {e}. Defaulting to 1.0")
-        #     confidence = 1.0
-
-        # self.clear_gpu_memory()
-        # return response, confidence
 
         confidence = 1.0
 

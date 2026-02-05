@@ -196,6 +196,6 @@ def run_nsvs(
         log_metrics("num_model_checks", _model_check_count)
         log_metrics("num_vlm_detections", _vlm_detection_count)
         return foi, all_detections, time_metrics
-
+    vlm.clear_gpu_memory()
     return foi, all_detections, None
 

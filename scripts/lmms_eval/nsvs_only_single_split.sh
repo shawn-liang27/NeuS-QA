@@ -1,6 +1,11 @@
 #!/bin/bash
 set -euo pipefail
 
+TOTAL_SPLITS=8  # Set this to your number of GPUs
+CURRENT_SPLIT=$1
+GPU=$2
+FRAME_WINDOW=$3
+
 JOB_DIR="$HOME/NeuS-VLM/NeuS-QA"
 JOB_ID=$(date +%Y%m%d_%H%M%S)
 
@@ -11,11 +16,10 @@ DATA_DIR="/usr/homes/sgl57/.data/LongVideoBench"
 # BURNED_DIR="/usr/homes/sgl57/.data/LongVideoBench/burn-subtitles/T3E_E3E_T3O_O3O_mix"
 BURNED_DIR="/usr/homes/sgl57/.data/LongVideoBench/burn-subtitles/T3E_E3E_T3O_O3O_mix_2026_01_14_21_55"
 MODEL="InternVL2-8B"
-MAX_TOKEN_LEN=65000
 
 CATEGORIES=("T3E" "E3E" "T3O" "O3O") # "T3E", "E3E", "T3O", "O3O"
 CAT_STR=$(IFS='_'; echo "${CATEGORIES[*]}")
-OUT_DIR="$JOB_DIR/experiment_results/nsvs/comparison_baseline/"${MODEL//\//_}"/nsvs_qa_split1_4_${JOB_ID}"
+OUT_DIR="$JOB_DIR/experiment_results/nsvs/comparison_baseline/"${MODEL//\//_}"/nsvs_qa_split${CURRENT_SPLIT}_${JOB_ID}"
 
 mkdir -p "$OUT_DIR"
 
@@ -33,10 +37,7 @@ set +a
 # =========================================================
 # CONFIGURATION
 # =========================================================
-TOTAL_SPLITS=306  # Set this to your number of GPUs
-CURRENT_SPLIT=$1
-GPU=$2
-FRAME_WINDOW=$3
+
 export CUDA_LAUNCH_BLOCKING=1
 # =========================================================
 # FUNCTION: Worker Logic (Runs in Parallel)
