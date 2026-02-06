@@ -5,7 +5,7 @@ JOB_DIR="$HOME/NeuS-VLM/NeuS-QA"
 JOB_ID=$(date +%Y%m%d_%H%M%S)
 
 export HF_HOME="$HOME/.cache/huggingface"
-
+export DECORD_EOF_RETRY_MAX=40960
 # Variables
 DATA_DIR="/usr/homes/sgl57/.data/LongVideoBench"
 # BURNED_DIR="/usr/homes/sgl57/.data/LongVideoBench/burn-subtitles/T3E_E3E_T3O_O3O_mix"
@@ -15,7 +15,7 @@ MAX_TOKEN_LEN=65000
 
 CATEGORIES=("T3E" "E3E" "T3O" "O3O") # "T3E", "E3E", "T3O", "O3O"
 CAT_STR=$(IFS='_'; echo "${CATEGORIES[*]}")
-OUT_DIR="$JOB_DIR/experiment_results/debug_nsvs/"${MODEL//\//_}"/nsvs_qa_${CAT_STR}_${JOB_ID}"
+OUT_DIR="$JOB_DIR/experiment_results/debug_nsvs/"${MODEL//\//_}"/clip_adaptive_sampling/${JOB_ID}"
 
 mkdir -p "$OUT_DIR"
 

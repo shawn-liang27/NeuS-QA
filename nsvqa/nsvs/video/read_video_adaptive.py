@@ -6,11 +6,11 @@ from sentence_transformers import util
 from PIL import Image
 import logging
 
-def get_relevant_frames_from_video(model, video_path, propositions, 
-                               threshold=0.23, sample_rate= 1, top_k=200, 
-                               merge_threshold_sec=3.0,
-                               window_padding = 1.0, 
-                               max_frames_per_segment=50, uniform_sample_size_limit=300):
+
+def read_video_adaptive(model, video_path, propositions, 
+                               threshold=0.23, tau_r=0.95, sample_rate=1, top_k=200, 
+                               merge_threshold_sec=3.0, window_padding=1.0, 
+                               max_frames_per_segment=50, uniform_sample_size_limit=240):
     """
     Refined Pipeline:
     1. Coarse CLIP Scan.
@@ -51,20 +51,30 @@ def get_relevant_frames_from_video(model, video_path, propositions,
         cleaned_props.append(clean)
 
     print(f"[DEBUG] Video {video_path} FPS {fps} Length {frame_count} Scanning {len(coarse_indices)} frames for {len(cleaned_props)} Proposition...\nSampled Frame: {coarse_indices}")
-
+    
+    print(f'[DEBUG] Max coarse index: {max(coarse_indices)}\nFrame Count: {frame_count}')
     prop_embeddings = model.encode(cleaned_props, convert_to_tensor=True)
     frame_scores = []
-
+    
     with torch.no_grad():
-        looper = tqdm.tqdm(enumerate(coarse_indices), total=len(coarse_indices))
-        for i, idx in looper:
-            # Encode frame and get best similarity across all propositions
-            frame_emb = model.encode(Image.fromarray(coarse_frames[i]), convert_to_tensor=True, show_progress_bar=False)
-            similarities = util.cos_sim(frame_emb, prop_embeddings)[0]
+        coarse_embs = model.encode([Image.fromarray(f) for f in coarse_frames], 
+                                   convert_to_tensor=True, show_progress_bar=True)
+        
+        for i, idx in enumerate(coarse_indices):
+            similarities = util.cos_sim(coarse_embs[i], prop_embeddings)[0]
             max_sim = float(torch.max(similarities))
-            
             if max_sim > threshold:
                 frame_scores.append({"idx": idx, "score": max_sim})
+
+        # looper = tqdm.tqdm(enumerate(coarse_indices), total=len(coarse_indices))
+        # for i, idx in looper:
+        #     # Encode frame and get best similarity across all propositions
+        #     frame_emb = model.encode(Image.fromarray(coarse_frames[i]), convert_to_tensor=True, show_progress_bar=False)
+        #     similarities = util.cos_sim(frame_emb, prop_embeddings)[0]
+        #     max_sim = float(torch.max(similarities))
+            
+        #     if max_sim > threshold:
+        #         frame_scores.append({"idx": idx, "score": max_sim})
 
     # --- 2. TOP-K ANCHOR SELECTION ---
     frame_scores.sort(key=lambda x: x["score"], reverse=True)
@@ -82,7 +92,7 @@ def get_relevant_frames_from_video(model, video_path, propositions,
             logging.info(f"[WARNING] Video {video_path} not is within budget ({uniform_sample_count} frames). Using Uniform Samplin Limit: {uniform_sample_size_limit}.")
             uniform_sample_count = uniform_sample_size_limit
 
-        indices = np.linspace(0, frame_count - 1, num=uniform_sample_size_limit, dtype=int).tolist()  
+        indices = np.linspace(0, frame_count - 1, num=uniform_sample_size_limit, dtype=int).tolist()   
         frames = vr.get_batch(indices).asnumpy()
         return {
             "images": frames,
@@ -139,11 +149,31 @@ def get_relevant_frames_from_video(model, video_path, propositions,
         final_indices.extend(chunk_idxs.tolist())
 
     # Final chronological sort and retrieval
-    final_indices = sorted(list(set(final_indices)))
-    flat_frames = vr.get_batch(final_indices).asnumpy()
-    logging.info(f'[DEBUG] CLIP Complete!\nRetained Indices: {final_indices}\nLength: {len(final_indices)}')
+    raw_final_indices = sorted(list(set(final_indices)))
+    final_frames_data = vr.get_batch(final_indices).asnumpy()
+
+    logging.info(f'[DEBUG] CLIP Complete!\nRetained Indices: {raw_final_indices}\nLength: {len(raw_final_indices)}')
+
+    with torch.no_grad():
+        final_embs = model.encode([Image.fromarray(f) for f in final_frames_data], 
+                                  convert_to_tensor=True, show_progress_bar=True)
+
+    deduplicated_indices = [raw_final_indices[0]]
+    last_kept_idx = 0
+
+    for i in range(1, len(raw_final_indices)):
+        similarity = util.cos_sim(final_embs[last_kept_idx], final_embs[i])
+        
+        # Keep the frame only if it's different enough from the last kept one
+        if similarity < tau_r:
+            deduplicated_indices.append(raw_final_indices[i])
+            last_kept_idx = i
+
+    logging.info(f"Deduplication complete. Final count: {len(deduplicated_indices)} (from {len(raw_final_indices)})")
+
+    final_frames = vr.get_batch(deduplicated_indices).asnumpy()
     return {
-        "images": [f for f in flat_frames],
-        "original_indices": final_indices,
-        "video_info": {"fps": fps, "frame_count": frame_count, "sample_rate" : sample_rate}
+        "images": [f for f in final_frames],
+        "original_indices": deduplicated_indices,
+        "video_info": {"fps": fps, "frame_count": frame_count, "sample_rate": sample_rate}
     }

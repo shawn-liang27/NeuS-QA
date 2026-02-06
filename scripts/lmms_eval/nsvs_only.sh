@@ -5,6 +5,12 @@ JOB_DIR="$HOME/NeuS-VLM/NeuS-QA"
 JOB_ID=$(date +%Y%m%d_%H%M%S)
 
 export HF_HOME="$HOME/.cache/huggingface"
+export DECORD_EOF_RETRY_MAX=40960
+
+TOTAL_SPLITS=8
+GPU_START=$1
+RUN_NUMBER=$2
+export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 
 # Variables
 DATA_DIR="/usr/homes/sgl57/.data/LongVideoBench"
@@ -15,7 +21,8 @@ MAX_TOKEN_LEN=65000
 
 CATEGORIES=("T3E" "E3E" "T3O" "O3O") # "T3E", "E3E", "T3O", "O3O"
 CAT_STR=$(IFS='_'; echo "${CATEGORIES[*]}")
-OUT_DIR="$JOB_DIR/experiment_results/nsvs_improved/"${MODEL//\//_}"/actual_batch_prop_plus_clip/nsvs_qa_${CAT_STR}_${JOB_ID}"
+
+OUT_DIR="$JOB_DIR/experiment_results/nsvs_improved/"${MODEL//\//_}"/clip_prop_frame_similarity_sampling_batched_prop_detect/pre_submission_run_${RUN_NUMBER}_dynamicpatch1"
 
 mkdir -p "$OUT_DIR"
 
@@ -30,12 +37,7 @@ source .venv/bin/activate
 set -a
 source .ENV
 set +a
-# =========================================================
-# CONFIGURATION
-# =========================================================
-TOTAL_SPLITS=8  # Set this to your number of GPUs
-GPU_START=$1
-export CUDA_VISIBLE_DEVICE=0,1,2,3,4,5,6,7
+
 # =========================================================
 # FUNCTION: Worker Logic (Runs in Parallel)
 # =========================================================
@@ -46,7 +48,7 @@ launch_worker() {
     # Unique log files for this worker
     local WORKER_LOG="${LOG_DIR}/worker_${SPLIT_ID}"
 
-    echo ">>> [Worker $SPLIT_ID] Server Ready. Running Python script..."
+    echo ">>> [Worker $SPLIT_ID] Ready. Running Python script..."
     local START_TIME=$(date +%s)
 
     python -u scripts/lmms_eval/nsvs_only.py \
@@ -58,7 +60,8 @@ launch_worker() {
         --current_split "${SPLIT_ID}" \
         --total_splits "${TOTAL_SPLITS}" \
         --categories "${CATEGORIES[@]}" \
-        --measure_metrics > "${WORKER_LOG}_eval.out" 2>&1
+        --measure_metrics \
+        >"${WORKER_LOG}_eval.out" 2>&1
 
     local PY_EXIT=$?
     
@@ -94,9 +97,6 @@ do
     sleep 5
 done
 
-# =========================================================
-# WAIT
-# =========================================================
 echo ">>> All workers launched. Waiting for completion..."
 wait
 echo ">>> All jobs finished."

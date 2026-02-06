@@ -15,6 +15,7 @@ from nsvqa.nsvs.vlm.vllm_client import VLLMClient
 import logging
 import time
 import sys
+import torch
 
 PRINT_ALL = False
 
@@ -53,9 +54,8 @@ def run_nsvs(
     proposition: list,
     specification: str,
     target_window: str,
-    model: str,
+    model,
     device: int,
-    vlm: str,
     measure_metrics: bool,
     model_type: str = "dtmc",
     num_of_frame_in_sequence = 3,
@@ -80,24 +80,61 @@ def run_nsvs(
             }
           
     """
-
-    def process_frame(sequence_of_frames: list[np.ndarray], current_indices: int, measure_metrics: bool, proposition: list):
-        object_of_interest = {}    
-
-        detected_objects = vlm.batch_detect(
-            seq_of_frames=sequence_of_frames,
+    def process_batch_windows(
+    batch_pixels_cpu: torch.Tensor, 
+    batch_indices: list[list[int]], 
+    precomputed_inputs: dict, 
+    proposition: list[str],
+    threshold: float
+    ):
+        """
+        Processes a batch of multiple windows at once.
+        Returns: list[VideoFrame]
+        """
+        # 1. Run the optimized multi-window detection
+        # This returns a flat list of responses (Length = Num Windows * Num Questions)
+        batch_results = model.batch_detect_multi_window(
             scene_descriptions=proposition,
-            threshold=vlm_detection_threshold
+            batch_pixels_cpu=batch_pixels_cpu,
+            precomputed_inputs=precomputed_inputs,
+            batch_size=len(batch_indices),
+            threshold=threshold
         )
+        # print(f"RETURNED DetectedObject: {len(batch_results)}")
+        
+        num_questions = len(proposition)
+        batch_video_frames = []
 
-        for detected_object in detected_objects:
-            object_of_interest[detected_object.name] = detected_object      
+        results_list = []
+        for window_indices, window_detections in zip(batch_indices, batch_results):
+            # window_detections is already the correct list of DetectedObjects
+            frame = VideoFrame(
+                frame_idx_list=window_indices,
+                object_of_interest={obj.name: obj for obj in window_detections}
+            )
+            results_list.append(frame)
 
-        frame = VideoFrame(
-            frame_idx_list=current_indices,
-            object_of_interest=object_of_interest,
-        )
-        return frame
+        return results_list
+
+    # def process_frame(sequence_of_frames: list[np.ndarray], current_indices: int, proposition: list):
+    #     object_of_interest = {}    
+    #     # Time per VLM proposition detection
+
+    #     detected_objects = model.batch_detect(
+    #                             batch_pixels_cpu=batch_pixels_cpu,
+    #                             precomputed_inputs=precomputed_inputs,
+    #                             scene_descriptions=proposition,
+    #                             threshol=vlm_detection_thresholdd
+    #                         )
+
+    #     for detected_object in detected_objects:
+    #         object_of_interest[detected_object.name] = detected_object      
+
+    #     frame = VideoFrame(
+    #         frame_idx_list=current_indices,
+    #         object_of_interest=object_of_interest,
+    #     )
+    #     return frame
 
     if PRINT_ALL:
         print(f"Propositions: {proposition}\n")
@@ -128,68 +165,97 @@ def run_nsvs(
         tl_satisfaction_threshold=tl_satisfaction_threshold,
         detection_threshold=detection_threshold
     )
+    frame_of_interest = FramesofInterest()
 
     if measure_metrics: 
         setup_duration = time.perf_counter() - setup_start
         log_metrics("automaton_set_up_time", setup_duration)
 
+
+    BATCH_SIZE = 3
+
     frames_with_indices = [
         (img, idx) for img, idx in zip(video_data["images"], video_data["original_indices"])
     ]
-    frame_of_interest = FramesofInterest()
-    # 1. Get continuous clusters from your CLIP output
+    gap_thres = 3 * video_data['video_info']['fps']
     event_clusters = group_into_continuous_events(frames_with_indices, gap_threshold=240)
 
     frame_windows = []
-
     for event in event_clusters:
-        # Only create windows if the event has enough frames
-        # Sliding window logic within a single continuous event
         for i in range(0, len(event), num_of_frame_in_sequence):
             window = event[i : i + num_of_frame_in_sequence]
-            
-            # Optional: If a window is too small (e.g., only 1 frame), 
-            # you might choose to skip it or pad it.
-            if len(window) > 0:
+            if len(window) == num_of_frame_in_sequence:
                 frame_windows.append(window)
 
-    if PRINT_ALL:
-        looper = enumerate(frame_windows)
-    else:
-        looper = tqdm.tqdm(enumerate(frame_windows), total=len(frame_windows))
+    images_to_process = []
+    for window in frame_windows:
+        for frame_data in window:
+            images_to_process.append(frame_data[0])
 
+    print(f"[DEBUG] Starting parallel preprocessing selected frames with dynamic patching")
+    preprocess_vid_time = time.perf_counter() if measure_metrics else 0
+    all_pixels, all_patches = model.load_video_from_seq_of_frames(seq_of_frames=images_to_process)
+    patches_per_frame = all_patches[0]
+
+    if measure_metrics: 
+        preprocess_vid_duration = time.perf_counter() - preprocess_vid_time
+        print(f'[DEBUG] Time Spent with InternVL2 dynamic patching {preprocess_vid_duration}')
+        log_metrics("vlm_dynamic_patching_time", preprocess_vid_duration)
+    
     if measure_metrics:
         log_metrics("num_frame_windows", len(frame_windows))
 
+    window_patch_config = [patches_per_frame] * num_of_frame_in_sequence 
+    pre_inputs = model.prepare_batch_inputs(proposition, window_patch_config)
+
+    pixel_pointer = 0
+    num_questions = len(proposition)
+    patches_per_window = patches_per_frame * num_of_frame_in_sequence
+
     all_detections = [set(), set()]
+    pbar = tqdm.tqdm(range(0, len(frame_windows), BATCH_SIZE), desc="Processing Batches")
 
-    for i, window in looper:
-        if PRINT_ALL:
-            print("\n" + "*"*50 + f" {i}/{len(frame_windows)-1} " + "*"*50)
-            print("Detections:")
+    detect_result_frames = []
+    for b_idx in pbar:
+        batch_windows = frame_windows[b_idx : b_idx + BATCH_SIZE]
+        actual_batch_size = len(batch_windows)
 
-        current_frames = [f[0] for f in window]
-    
-        # 2. Extract the indices (index 1) for your automaton/logic
-        current_indices = [f[1] for f in window]
+        print(f"\n[DEBUG] Batch Index: {b_idx}")
+        print(f"[DEBUG] Number of windows in this batch: {len(batch_windows)}")
+        print(f"[DEBUG] Global all_pixels shape: {all_pixels.shape}")
+        print(f"[DEBUG] patches_per_frame: {patches_per_frame}")
 
+        tiles_to_grab = actual_batch_size * patches_per_window
+        batch_pixels_cpu = all_pixels[pixel_pointer : pixel_pointer + tiles_to_grab]
+        pixel_pointer += tiles_to_grab
+
+        batch_indices = [[f[1] for f in window] for window in batch_windows]
+
+        print(f"Batch indices: {batch_indices}")
+        print(f"DEBUG: GPU Pixel Shape: {batch_pixels_cpu.shape} | Batch Size: {len(batch_windows)}")
+        # --- GPU INFERENCE ---
+        # We pass the batch of windows. Internally, the model will extract features 
+        # for all images once and expand them for the questions.
         per_window_detection_start = time.perf_counter() if measure_metrics else 0
-
         try:
-            frame = process_frame(current_frames, current_indices, measure_metrics, proposition)
+            frames = process_batch_windows(
+                batch_pixels_cpu=batch_pixels_cpu,
+                batch_indices=batch_indices, # List of lists
+                precomputed_inputs=pre_inputs,
+                proposition=proposition,
+                threshold=vlm_detection_threshold
+            )
         except Exception as e:
             print(f"[FATAL] Caught Exception: {e}\nExiting the Program...")
             traceback.print_exc()
             sys.exit(1) 
         if measure_metrics: 
-            per_window_detection_duration = time.perf_counter() - per_window_detection_start
-            log_metrics("per_frame_window_detection_time", per_window_detection_duration, True)
+            per_batch_window_detection_duration = time.perf_counter() - per_window_detection_start
+            log_metrics("per_batch_window_detection_time", per_batch_window_detection_duration, True)
+            log_metrics("per_window_detection_time", per_batch_window_detection_duration / len(batch_indices), True)
+        detect_result_frames.extend(frames)
 
-        # if PRINT_ALL:
-        #     print("Detections Completed and Returned")
-        # if PRINT_ALL and False: # disabled
-        #     os.makedirs(image_output_dir, exist_ok=True)
-        #     frame.save_frame_img(save_path=os.path.join(image_output_dir, f"{i}"))
+    for frame in detect_result_frames:
         if checker.validate_frame(frame_of_interest=frame):
             thresh = frame.thresholded_detected_objects(threshold=detection_threshold)
             for prop in thresh.keys():
@@ -216,7 +282,7 @@ def run_nsvs(
                 log_metrics("model_checks_time", per_model_check_duration, True)
 
     automaton_foi = frame_of_interest.compile_foi()
-
+        
     if PRINT_ALL:
         print(f"Automaton indices (Actual): {automaton_foi}")
 
@@ -277,14 +343,15 @@ def run_nsvs(
                     curr_start, curr_end = next_start, next_end
             merged.append((curr_start, curr_end))
 
+        # Return list of tuples: [(100, 500), (1200, 1500)]
+
     if True:
         print("\n" + "-"*107)
         print(f"Automaton_foi {automaton_foi}")
         print(f"All Detections: {all_detections}")
         print("Detected frames of interest:")
         print(foi)
-
-    logging.info(f"Merged Frames of Interests: {merged}")
+        print(f"Merged Frames of Interests: {merged}")
 
     if measure_metrics:
         log_metrics("num_model_checks", _model_check_count)
@@ -292,4 +359,4 @@ def run_nsvs(
         return foi, all_detections, merged, time_metrics
 
     return foi, all_detections, merged, None
-
+    

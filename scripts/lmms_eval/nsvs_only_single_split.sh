@@ -5,6 +5,13 @@ JOB_DIR="$HOME/NeuS-VLM/NeuS-QA"
 JOB_ID=$(date +%Y%m%d_%H%M%S)
 
 export HF_HOME="$HOME/.cache/huggingface"
+export DECORD_EOF_RETRY_MAX=40960
+
+TOTAL_SPLITS=8 
+CURRENT_SPLIT=$1
+GPU=$2
+RUN_NUMBER=$3
+export CUDA_LAUNCH_BLOCKING=1
 
 # Variables
 DATA_DIR="/usr/homes/sgl57/.data/LongVideoBench"
@@ -15,7 +22,9 @@ MAX_TOKEN_LEN=65000
 
 CATEGORIES=("T3E" "E3E" "T3O" "O3O") # "T3E", "E3E", "T3O", "O3O"
 CAT_STR=$(IFS='_'; echo "${CATEGORIES[*]}")
-OUT_DIR="$JOB_DIR/experiment_results/nsvs_improved/"${MODEL//\//_}"/actual_batch_prop_plus_clip/nsvs_qa_${CAT_STR}_${JOB_ID}"
+# OUT_DIR="$JOB_DIR/experiment_results/nsvs_improved/"${MODEL//\//_}"/actual_batch_prop_plus_clip/pre_submission_run_${RUN_NUMBER}_split_${CURRENT_SPLIT}_dynamicpatch1"
+OUT_DIR="$JOB_DIR/experiment_results/nsvs_improved/"${MODEL//\//_}"/clip_prop_frame_similarity_sampling_batched_prop_detect/pre_submission_run_${RUN_NUMBER}_split_${CURRENT_SPLIT}_dynamicpatch1"
+# OUT_DIR="$JOB_DIR/experiment_results/debug_nsvs/"${MODEL//\//_}"/clip_adaptive_sampling/split1_${JOB_ID}"
 
 mkdir -p "$OUT_DIR"
 
@@ -30,13 +39,7 @@ source .venv/bin/activate
 set -a
 source .ENV
 set +a
-# =========================================================
-# CONFIGURATION
-# =========================================================
-TOTAL_SPLITS=8  # Set this to your number of GPUs
-CURRENT_SPLIT=$1
-GPU=$2
-export CUDA_LAUNCH_BLOCKING=1
+
 # =========================================================
 # FUNCTION: Worker Logic (Runs in Parallel)
 # =========================================================

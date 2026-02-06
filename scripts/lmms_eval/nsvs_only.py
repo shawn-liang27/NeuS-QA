@@ -19,80 +19,9 @@ import logging
 import time
 from collections import defaultdict
 
+from nsvqa.nsvs.video.read_video_adaptive import read_video_adaptive
+
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
-
-def aggregate_metrics(raw_results):
-    """
-    raw_results: list of { "category": str, "time_metrics": dict }
-    time_metrics dict format:
-    time_metrics: {
-        "completion_time" : float,
-        "PULS_time" : float,
-        "Target_ID_time" : float, 
-        "NeuS_time" : float,
-        "num_propositions" : int,
-        "frame_count" : int,
-        "video_IO_time" : float
-        "num_frame_windows" : int,
-        "per_proposition_detection_time" : list[float],
-        "per_frame_window_detection_time" : list[float],
-        "model_checks_time" : list[float],
-        "num_model_checks" : int,
-        "num_vlm_detections" : int
-    }
-    """
-    # 1. Initialize data structures
-    category_accumulators = defaultdict(lambda: defaultdict(float))
-    category_counts = defaultdict(int)
-    
-    global_accumulator = defaultdict(float)
-    global_count = 0
-
-    # List of keys to sum directly
-    scalar_keys = [
-        "completion_time", "PULS_time", "Target_ID_time", "NeuS_time", "frame_count", 
-        "num_propositions", "num_frame_windows", "num_model_checks", "num_vlm_detections", "video_IO_time", "automaton_set_up_time"
-    ]
-    # List of keys that are lists in raw data (require nested summing)
-    list_keys = ["per_proposition_detection_time", "model_checks_time", "per_frame_window_detection_time"]
-
-    # 2. Single-pass Accumulation
-    for entry in raw_results:
-        entry["time_metrics"]["frame_count"] = entry["metadata"].get("frame_count", 0)
-        cat = entry["metadata"]["duration_group"]
-        metrics = entry["time_metrics"]
-        
-        category_counts[cat] += 1
-        global_count += 1
-
-        for key in scalar_keys:
-            val = metrics.get(key, 0)
-            category_accumulators[cat][key] += val
-            global_accumulator[key] += val
-
-        for key in list_keys:
-            val_list = metrics.get(key, [])
-            length = len(val_list) if len(val_list) > 0 else 1
-            total_time = sum(val_list) / length
-            # We track the sum of sums for the high-level average
-            category_accumulators[cat][key] += total_time
-            global_accumulator[key] += total_time
-
-    # 3. Final Aggregation
-    category_aggregated = {}
-    for cat, totals in category_accumulators.items():
-        count = category_counts[cat]
-        category_aggregated[cat] = {
-            "count": count,
-            **{f"avg_{k}": v / count for k, v in totals.items()}
-        }
-
-    global_aggregated = {
-        "total_questions": global_count,
-        **{f"global_avg_{k}": v / global_count for k, v in global_accumulator.items()}
-    }
-
-    return {"Categorical Metrics" : category_aggregated, "Global Metrics" :global_aggregated}
 
 
 def exec_puls(entry, save_dir): # Step 1
@@ -126,7 +55,9 @@ def exec_nsvs(entry, sample_rate, device, model, clip_model, vlm, measure_metric
     # 1. Video IO time
     io_start = time.perf_counter() if measure_metrics else 0
     
-    video_data = get_relevant_frames_from_video(model=clip_model, video_path=entry["paths"]["video_path"], propositions=entry["puls"]["proposition"], threshold=0.22)
+    # video_data = get_relevant_frames_from_video(model=clip_model, video_path=entry["paths"]["video_path"], propositions=entry["puls"]["proposition"], threshold=0.22)
+
+    video_data = read_video_adaptive(model=clip_model, video_path=entry["paths"]["video_path"], propositions=entry["puls"]["proposition"], threshold=0.22)
     
     if measure_metrics: entry["time_metrics"]["video_IO_time"] = time.perf_counter() - io_start
 
@@ -173,7 +104,7 @@ def run_nsvqa(output_dir, llm_convo_dir, current_split, total_splits, vlm_config
     starting = (len(data) * (current_split-1)) // total_splits
     ending = (len(data) * current_split) // total_splits
 
-    vlm = InternVL(model_name=vlm_config[1], device=vlm_config[0])
+    vlm = InternVL(model_name=vlm_config[1], device=vlm_config[0], max_patch=1)
     print("Loading CLIP model to GPU...")
     clip_model = SentenceTransformer('clip-ViT-B-32', device=f'cuda:{vlm_config[0]}')
     clip_model.eval()
@@ -247,18 +178,18 @@ def main(args):
     # Time PostProcess
     data_loader.postprocess_data(nsvqa_dir, args.measure_metrics)
 
-    if args.measure_metrics:
-        try:
-            runtime_metrics_dir = f"{experiment_dir}/runtime_metrics"
-            os.makedirs(runtime_metrics_dir, exist_ok=True)
-            with open(postprocess_dir, "r") as file:
-                raw_result = json.load(file)
-            metrics_result = aggregate_metrics(raw_result)
-            print(f"Saving Time Metrics Result to '{runtime_metrics_dir}/runtime_metrics_{current_split}.json'")
-            with open(f'{runtime_metrics_dir}/runtime_metrics_{current_split}.json', "w") as f:
-                json.dump(metrics_result, f, indent=4)
-        except Exception as e:
-            print()
+    # if args.measure_metrics:
+    #     try:
+    #         runtime_metrics_dir = f"{experiment_dir}/runtime_metrics"
+    #         os.makedirs(runtime_metrics_dir, exist_ok=True)
+    #         with open(postprocess_dir, "r") as file:
+    #             raw_result = json.load(file)
+    #         metrics_result = aggregate_metrics(raw_result)
+    #         print(f"Saving Time Metrics Result to '{runtime_metrics_dir}/runtime_metrics_{current_split}.json'")
+    #         with open(f'{runtime_metrics_dir}/runtime_metrics_{current_split}.json', "w") as f:
+    #             json.dump(metrics_result, f, indent=4)
+    #     except Exception as e:
+    #         print()
     
 
 if __name__ == "__main__":

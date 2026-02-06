@@ -37,7 +37,7 @@ def get_dataframe(raw_results, num_of_frame_in_sequence, out_dir):
     df = pd.DataFrame(metric_list)
     df.to_csv(f'{out_dir}/metric_data.csv', index=False)
 
-def aggregate_metrics(raw_results):
+def aggregate_metrics(raw_results, is_naive):
     """
     raw_results: list of { "category": str, "time_metrics": dict }
     time_metrics dict format:
@@ -80,13 +80,22 @@ def aggregate_metrics(raw_results):
         foi = entry["frames_of_interest"]
 
         total_foi = 0
-        for segment in foi:
-            if segment == -1:
-                diff = frame_count
+        if is_naive:
+            if foi == [-1]:
+                total_foi = frame_count
             else:
-                diff = segment[1] - segment[0]
-            total_foi += diff
+                total_foi = foi[1] - foi[0]
+        else:
+            for segment in foi:
+                if segment == -1:
+                    diff = frame_count
+                else:
+                    diff = segment[1] - segment[0]
+                total_foi += diff
+            
 
+        if not total_foi:
+            total_foi = 1
         pct_foi_out_of_full = round(frame_count / total_foi, 3)
 
         entry["time_metrics"]["foi_count"] = total_foi
@@ -162,6 +171,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("nsvs_result_dir")
     parser.add_argument("frames_window", type=int, default=3)
+    parser.add_argument("--naive", action="store_true")
     args = parser.parse_args()
     nsvs_result_dir = args.nsvs_result_dir
     out_file = f'{nsvs_result_dir}/run_time_metrics.json'
@@ -174,7 +184,7 @@ def main():
             out = json.load(file)
             raw_res.extend(out)
     
-    metrics = aggregate_metrics(raw_res)
+    metrics = aggregate_metrics(raw_res, args.naive)
     get_dataframe(raw_res, args.frames_window, nsvs_result_dir)
     print(metrics)
 
