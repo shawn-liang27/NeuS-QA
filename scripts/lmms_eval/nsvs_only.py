@@ -1,6 +1,7 @@
 from nsvqa.target_identification.target_identification import *
 from nsvqa.nsvs.model_checker.frame_validator import *
 from nsvqa.datamanager.longvideobench import *
+from nsvqa.datamanager.video_mme import *
 from nsvqa.nsvs.video.read_video import *
 from nsvqa.datamanager.custom import *
 from nsvqa.nsvs.vlm.obj import *
@@ -250,7 +251,8 @@ def main(args):
 
     print(f'Loading Data from Data_Dir: {args.data_dir}\nBurned_Dir: {args.burned_dir}')
         
-    data_loader = LongVideoBench(dataset_path=args.data_dir, burned_path=args.burned_dir, postprocess_dir=postprocess_dir, categories=args.categories)
+    # data_loader = LongVideoBench(dataset_path=args.data_dir, burned_path=args.burned_dir, postprocess_dir=postprocess_dir, categories=args.categories)
+    data_loader = VideoMMEManager(dataset_path=args.data_dir, burned_path=args.burned_dir, postprocess_dir=postprocess_dir, categories=args.categories)
 
     run_nsvqa(output_dir=nsvqa_dir, llm_convo_dir=nsvs_llm_convo_dir, current_split=args.current_split, total_splits=args.total_splits, vlm_config=vlm_config, data_dir=args.data_dir, data_loader=data_loader, frame_window=args.frame_window, measure_metrics=args.measure_metrics)
     # Time PostProcess

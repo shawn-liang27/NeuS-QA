@@ -92,7 +92,7 @@ trap 'echo ">>> Killing all workers..."; kill $(jobs -p); exit' SIGINT SIGTERM
 for (( i=1; i<=TOTAL_SPLITS; i++ ))
 do
     # Calculate GPU ID (0-based) from Split ID (1-based)
-    GPU_ID=$(($GPU_START + (i-1)))
+    GPU_ID=$(($GPU_START + (i-1))
     
     # Launch function in background
     launch_worker $MODEL $i $GPU_ID &
