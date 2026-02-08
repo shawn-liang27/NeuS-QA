@@ -11,14 +11,18 @@
 
 set -euo pipefail
 
-cd /home/sgl57/ECSE_gxd234_1/NeuS-QA/
+# hf download lmms-lab/Video-MME  --repo-type dataset
+# unzip subtitle.zip -d "/usr/homes/sgl57/.data/Video-MME"
+# for f in videos_chunked_*.zip; do unzip "$f" -d "/usr/homes/sgl57/.data/Video-MME"; done
+
 source .venv/bin/activate
-DATASET=video_mme
-DATA_DIR="${HF_HOME}/hub/datasets/${DATASET}"           
+DATA_DIR="/usr/homes/sgl57/.data/Video-MME"           
 OUT_DIR="${DATA_DIR}/burn-subtitles" 
 
 echo "Starting burning subtitles..."
 mkdir -p "$OUT_DIR"
+
+python scripts/dataset_preprocessing/video_mme/prepare_video_mme.py --data_dir "${DATA_DIR}"
 
 python scripts/dataset_preprocessing/video_mme/burn_subtitles.py --data_dir "${DATA_DIR}" --out_dir "${OUT_DIR}" > "${OUT_DIR}/burn_subtitles.log" 2>&1 
 

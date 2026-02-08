@@ -1,6 +1,11 @@
 #!/bin/bash
 set -euo pipefail
 
+TOTAL_SPLITS=1  # Set this to your number of GPUs
+CURRENT_SPLIT=$1
+GPU=$2
+FRAME_WINDOW=$3
+
 JOB_DIR="$HOME/NeuS-VLM/NeuS-QA"
 JOB_ID=$(date +%Y%m%d_%H%M%S)
 
@@ -8,13 +13,13 @@ export HF_HOME="$HOME/.cache/huggingface"
 
 # Variables
 DATA_DIR="/usr/homes/sgl57/.data/LongVideoBench"
-# BURNED_DIR="/usr/homes/sgl57/.data/LongVideoBench/burn-subtitles/T3E_E3E_T3O_O3O_mix"
-BURNED_DIR="/usr/homes/sgl57/.data/LongVideoBench/burn-subtitles/T3E_E3E_T3O_O3O_mix_2026_01_14_21_55"
+DATA_DIR="/usr/homes/sgl57/.data/Video-MME"
+BURNED_DIR="/usr/homes/sgl57/.data/Video-MME/burn-subtitles"
 MODEL="InternVL2-8B"
 
 CATEGORIES=("T3E" "E3E" "T3O" "O3O") # "T3E", "E3E", "T3O", "O3O"
 CAT_STR=$(IFS='_'; echo "${CATEGORIES[*]}")
-OUT_DIR="$JOB_DIR/experiment_results/nsvs/naive_neus_baseline/"${MODEL//\//_}"/nsvs_qa_${CAT_STR}_${JOB_ID}"
+OUT_DIR="$JOB_DIR/experiment_results/nsvs/naive_trials/video_mme/video_mme_split${CURRENT_SPLIT}_${JOB_ID}"
 
 mkdir -p "$OUT_DIR"
 
@@ -32,10 +37,8 @@ set +a
 # =========================================================
 # CONFIGURATION
 # =========================================================
-TOTAL_SPLITS=4  # Set this to your number of GPUs
-GPU_START=$1
-FRAME_WINDOW=$2
-export CUDA_VISIBLE_DEVICE=0,1,2,3,4,5,6,7
+
+export CUDA_LAUNCH_BLOCKING=1
 # =========================================================
 # FUNCTION: Worker Logic (Runs in Parallel)
 # =========================================================
@@ -49,7 +52,7 @@ launch_worker() {
     echo ">>> [Worker $SPLIT_ID] Server Ready. Running Python script..."
     local START_TIME=$(date +%s)
 
-    python -u scripts/lmms_eval/nsvs_only.py \
+    python -u scripts/lmms_eval/nsvs_only_video_mme.py \
         --vlm_model_name "${MODEL}" \
         --port_number "${GPU_ID}" \
         --data_dir "${DATA_DIR}" \
@@ -89,17 +92,19 @@ launch_worker() {
 
 trap 'echo ">>> Killing all workers..."; kill $(jobs -p); exit' SIGINT SIGTERM
 
-for (( i=1; i<=TOTAL_SPLITS; i++ ))
-do
-    # Calculate GPU ID (0-based) from Split ID (1-based)
-    GPU_ID=$(($GPU_START + (i-1)))
+# for (( i=1; i<=TOTAL_SPLITS; i++ ))
+# do
+#     # Calculate GPU ID (0-based) from Split ID (1-based)
+#     GPU_ID=$(($GPU_START + (i-1)))
     
-    # Launch function in background
-    launch_worker $MODEL $i $GPU_ID &
+#     # Launch function in background
+#     launch_worker $MODEL $i $GPU_ID &
     
-    # Small sleep to prevent all 4 servers from spiking CPU/Disk at the exact same millisecond
-    sleep 5
-done
+#     # Small sleep to prevent all 4 servers from spiking CPU/Disk at the exact same millisecond
+#     sleep 5
+# done
+
+launch_worker $MODEL $CURRENT_SPLIT $GPU &
 
 # =========================================================
 # WAIT

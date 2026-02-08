@@ -13,10 +13,20 @@ Stage 2: TL Specification Generation
 Using only the list of the propositions extracted in Stage 1, generate a single Temporal Logic (TL) specification that catpures the sequence of logical structure implied by the question. 
 
 Rules:
-- The formula must use each proposition **exactly once**
-- Use only the TL operators: `AND`, `OR`, `NOT`, `UNTIL`
+- The formula must use each proposition **exactly once**.
 - Do **not** infer new events or rephrase propositions.
-- The formula should reflect the temporal or logical relationships between the propositions under which the question would be understandable.
+- Use only the TL operators: `AND`, `OR`, `NOT`, `UNTIL`, `EVENTUALLY`.
+- `EVENTUALLY` means an event happens at some point in the future.
+- `UNTIL` means the an event must be true CONTINUOUSLY until the next becomes true.
+- **CRITICAL:**: 
+    - BINARY GROUPING RULE: Every UNTIL operation must be enclosed in its own set of parentheses. For a sequence, always group from the right.
+    - If Unary operator AND, OR, NOT, EVENTUALLY is used on the left or the right side of the UNTIL operation, they must be enclosed in parentheses.
+    Example:
+      - INCORRECT: A UNTIL B UNTIL C
+      - CORRECT: (A UNTIL (B UNTIL C)
+      - INCORRECT: A AND B UNTIL C
+      - CORRECT: ((A AND B) UNTIL C)
+      
 
 **Examples**
 
@@ -31,28 +41,28 @@ Example 2: "In a dimly lit room, two robots stand silently. What happens when th
 Output:
 {{
   "proposition": ["robots stand silently", "red robot starts blinking", "green robot turns off"],
-  "specification": "robots stand silently UNTIL (red robot starts blinking OR NOT green robot turns off)"
+  "specification": "(robots stand silently UNTIL (red robot starts blinking OR NOT green robot turns off))"
 }}
 
-Example 3: "Inside a cave, a man holds a lantern. What happens when the man sees the dragon?"
+Example 3: "What is the sequence of steps? (a) adjusting seat (b) walk with brakes (c) start to pedal."
 Output:
 {{
-  "proposition": ["man holds lantern", "man sees dragon"],
-  "specification": "man holds lantern UNTIL man sees dragon"
+  "proposition": ["adjusting seat", "walk with brakes", "start to pedal"],
+  "specification": "EVENTUALLY adjusting seat AND EVENTUALLY walk with brakes AND EVENTUALLY start to pedal"
 }}
 
-Example 4: "What happened on the screen before a man in black armor with glasses spoke into the microphone in front of a golden sky and the subtitles said 'country uh so we've seen significant'?"
+Example 4: "What happened after the man in black armor spoke and then the pink paper appeared followed by the yellow paper?"
 Output:
 {{
-  "proposition": ["man in black armor with glasses spoke into the microphone", "man is in front of a golden sky", "subtitle_'country uh so we've seen significant'"],
-  "specification": "(man in black armor with glasses spoke into the microphone AND man is in front of a golden sky) UNTIL (subtitle_'country uh so we've seen significant')"
+  "proposition": ["man in black armor spoke", "pink paper appeared", "yellow paper appeared"],
+  "specification": "(man in black armor spoke UNTIL (pink paper appeared UNTIL yellow paper appeared))"
 }}
 
 Example 5: "A news anchor with curled hair is wearing a pink blazer over a black base and sitting in front of the camera reading the news. What happened before the caption 'standards our climate editor Justin rout' appeared?"
 Output:
 {{
   "proposition": ["news anchor with curled hair is wearing a pink blazer over a black base", "news anchor sitting in front of the camera reading the news", "subtitle_'standards our climate editor Justin rout'"],
-  "specification": "(news anchor with curled hair is wearing a pink blazer over a black base AND news anchor sitting in front of the camera reading the news) UNTIL subtitle_'standards our climate editor Justin rout'"
+  "specification": "((news anchor with curled hair is wearing a pink blazer over a black base AND news anchor sitting in front of the camera reading the news) UNTIL subtitle_'standards our climate editor Justin rout')"
 }}
 
 
@@ -60,7 +70,7 @@ Example 6: "How did the girl feel before turning on the computer?"
 Output:
 {{
   "proposition": ["girl turns on computer"],
-  "specification": "(girl turns on computer)"
+  "specification": "EVENTUALLY girl turns on computer"
 }}
 
 **Now process the following prompt:**

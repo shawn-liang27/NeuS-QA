@@ -32,7 +32,7 @@ set +a
 # =========================================================
 # CONFIGURATION
 # =========================================================
-TOTAL_SPLITS=4  # Set this to your number of GPUs
+TOTAL_SPLITS=8  # Set this to your number of GPUs
 GPU_START=$1
 FRAME_WINDOW=$2
 export CUDA_VISIBLE_DEVICE=0,1,2,3,4,5,6,7

@@ -31,7 +31,6 @@ def get_video_duration(video_path):
 def burn_subtitles_on_video(video_path, subtitle_srt_path, save_path, out_dir):
     log_file = os.path.join(out_dir, "err.txt")
     video_id = os.path.basename(video_path)
-    ffmpeg_bin = os.path.expanduser("~/bin/ffmpeg")
     
     # 1. Check if subtitle file exists; if not, just copy the original video
     if not os.path.exists(subtitle_srt_path) or os.path.getsize(subtitle_srt_path) == 0:
@@ -49,7 +48,7 @@ def burn_subtitles_on_video(video_path, subtitle_srt_path, save_path, out_dir):
     # 3. Construct the command
     # Using 'ultrafast' preset to minimize compute time on the HPC nodes
     cmd = [
-        ffmpeg_bin, "-i", video_path,
+        "ffmpeg", "-i", video_path,
         "-vf", f"subtitles='{safe_subtitle_path}':force_style='{style}'",
         "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
         "-c:a", "copy", "-y", save_path
@@ -104,7 +103,7 @@ def process_entry(item, data_dir, out_dir):
 
     burn_subtitles_on_video(video_path, subtitle_path, save_path, out_dir)
 
-def main(data_dir, out_dir, data):
+def main(data_dir, out_dir, data, categories=["Temporal Reasoning"]):
     # Video-MME is large; keeping parallel workers restricted to prevent IO bottleneck
     num_workers = min(8, cpu_count())
     print(f"Using {num_workers} parallel workers for Video-MME.")
@@ -115,10 +114,9 @@ def main(data_dir, out_dir, data):
 
     temporal_videos = []
     for key, video in unique_videos.items():
-        if video["task_type"] == "Temporal Reasoning":
+        if video["task_type"] in categories:
             video["video_path"] = f"{out_dir}/{video["duration"]}/{video["videoID"]}.mp4"
             temporal_videos.append(video)
-            
     
     with open(os.path.join(args.out_dir, "dataset.json"), "w") as f:
         json.dump(temporal_videos, f, indent=4)
@@ -131,6 +129,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--data_dir", type=str, required=True, help="Path containing 'videos' and 'subtitles'")
     parser.add_argument("--out_dir", type=str, required=True, help="Where to save burned videos")
+
+    parser.add_argument('--categories', nargs='+', type=str, default=["Temporal Reasoning"])
     args = parser.parse_args()
     
     # Load Video-MME metadata (usually test.json)

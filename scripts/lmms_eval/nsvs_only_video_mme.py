@@ -1,14 +1,11 @@
 from nsvqa.target_identification.target_identification import *
-from nsvqa.nsvs.model_checker.frame_validator import *
 from nsvqa.datamanager.longvideobench import *
 from nsvqa.datamanager.video_mme import *
 from nsvqa.nsvs.video.read_video import *
 from nsvqa.datamanager.custom import *
 from nsvqa.nsvs.vlm.obj import *
-from nsvqa.nsvs.nsvs import *
-from nsvqa.puls.puls import *
-from nsvqa.vqa.vqa import vqa
-from nsvqa.vqa.lmm_vqa import lmm_eval_vqa
+from nsvqa.nsvs.nsvs_multi import *
+from nsvqa.puls_multi_operators.puls import *
 from nsvqa.nsvs.vlm.internvl import InternVL
 
 import json
@@ -101,6 +98,7 @@ def exec_puls(entry, save_dir): # Step 1
     entry["puls"]["proposition"] = output["proposition"]
     entry["puls"]["specification"] = output["specification"]
     entry["puls"]["conversation_history"] = os.path.join(os.getcwd(), output["saved_path"])
+    entry["puls"]["is_valid"] = output["is_valid"]
 
 def exec_target_identification(entry, save_dir): # Step 2
     print("Target ID is called")
@@ -187,6 +185,7 @@ def exec_merge(entry): # Step 4
 def run_nsvqa(output_dir, llm_convo_dir, current_split, total_splits, vlm_config, data_dir, data_loader, frame_window = 3, measure_metrics=False):
     data = data_loader.load_data()
     print(f'Data Loading Complete! Data Length {len(data)}\nStarting NSVS Module')
+    print(data)
     output = []
     starting = (len(data) * (current_split-1)) // total_splits
     ending = (len(data) * current_split) // total_splits
@@ -207,12 +206,16 @@ def run_nsvqa(output_dir, llm_convo_dir, current_split, total_splits, vlm_config
         if measure_metrics: 
             metrics["PULS_time"] = time.perf_counter() - p_start
             metrics["num_propositions"] = len(entry["puls"]["proposition"])
-
+        if not entry["puls"].get("is_valid", True):
+            logging.critical(f'PULS failed to process Propositions and Specification for Task: {id}, Returning Full Video Length')
+            entry["frames_of_interest"] = [-1]
+            continue
         # 3. Module: Target Identification
         tid_start = time.perf_counter() if measure_metrics else 0
         exec_target_identification(entry, llm_convo_dir)
         if measure_metrics: metrics["Target_ID_time"] = time.perf_counter() - tid_start
 
+        print(f'[DEBUG] Question:\nvideo_id:{entry['metadata']['video_id']} question_id: {entry['metadata']['question_id']} id: {entry['metadata']['id']}\nQuestion: {entry["question"]}\nCandidates: {entry["candidates"]}\n[DEBUG] PULS\n Propositions: {entry["puls"]["proposition"]}\nSpecifications: {entry["puls"]["specification"]}\nTarget Identification: {entry["target_identification"]["frame_window"]}\nExplanation: {entry["target_identification"]["explanation"]}')
         # 4. Module: NSVS (The primary bottleneck)
         # Note: Ensure exec_nsvs is modified to accept and return per-window timing
         n_start = time.perf_counter() if measure_metrics else 0
@@ -251,9 +254,9 @@ def main(args):
 
     print(f'Loading Data from Data_Dir: {args.data_dir}\nBurned_Dir: {args.burned_dir}')
         
-    data_loader = LongVideoBench(dataset_path=args.data_dir, burned_path=args.burned_dir, postprocess_dir=postprocess_dir, categories=args.categories)
-    # data_loader = VideoMME(dataset_path=args.data_dir, burned_path=args.burned_dir, postprocess_dir=postprocess_dir, categories=args.categories)
-
+    # data_loader = LongVideoBench(dataset_path=args.data_dir, burned_path=args.burned_dir, postprocess_dir=postprocess_dir, categories=args.categories)
+    data_loader = VideoMME(dataset_path=args.data_dir, burned_path=args.burned_dir, postprocess_dir=postprocess_dir, categories=args.categories)
+    
     run_nsvqa(output_dir=nsvqa_dir, llm_convo_dir=nsvs_llm_convo_dir, current_split=args.current_split, total_splits=args.total_splits, vlm_config=vlm_config, data_dir=args.data_dir, data_loader=data_loader, frame_window=args.frame_window, measure_metrics=args.measure_metrics)
     # Time PostProcess
     data_loader.postprocess_data(nsvqa_dir, args.measure_metrics)

@@ -37,7 +37,7 @@ class VideoMME(Manager):
                 # Check for subtitle file (.srt is standard for Video-MME)
                 subtitle_file = os.path.join(subtitle_root, f"{video_id}.srt")
                 subtitle_path = subtitle_file if os.path.exists(subtitle_file) else None
-                item["video_path"] = os.patj.join(self._burned_path, duration_group, video_filename)
+                item["video_path"] = os.path.join(self._burned_path, duration_group, video_filename)
                 entry = {
                     "question": item["question"],
                     "candidates": item["options"],
@@ -50,9 +50,10 @@ class VideoMME(Manager):
                     },
                     "metadata": {
                         "video_id": video_id,
-                        "id": f"{video_id}_{q_idx}",
+                        "question_id": question_id,
+                        "id": f"{video_id}_{question_id}",
                         "duration_group": duration_group,
-                        "domain": item["doamin"],
+                        "domain": item["domain"],
                         "sub_category": item["sub_category"],
                         "task_type": item["task_type"],
                     }
