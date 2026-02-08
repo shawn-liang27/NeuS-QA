@@ -72,7 +72,7 @@ def get_relevant_frames_from_video(model, video_path, propositions,
 
     if not top_anchors:
         logging.info(f"[WARNING] Zero hits at {threshold}. Falling back to Top-50 anchors above 0.18.")
-        top_anchors = [s for s in frame_scores if s["score"] >= thresh-0.03][:top_k]
+        top_anchors = [s for s in frame_scores if s["score"] >= threshold-0.03][:top_k]
         
     if not top_anchors:
         logging.info("[WARNING] CLIP Relevant Search Speedup Failed, Switching Back to Uniform Sampling")

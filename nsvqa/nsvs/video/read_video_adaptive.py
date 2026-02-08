@@ -66,23 +66,13 @@ def read_video_adaptive(model, video_path, propositions,
             if max_sim > threshold:
                 frame_scores.append({"idx": idx, "score": max_sim})
 
-        # looper = tqdm.tqdm(enumerate(coarse_indices), total=len(coarse_indices))
-        # for i, idx in looper:
-        #     # Encode frame and get best similarity across all propositions
-        #     frame_emb = model.encode(Image.fromarray(coarse_frames[i]), convert_to_tensor=True, show_progress_bar=False)
-        #     similarities = util.cos_sim(frame_emb, prop_embeddings)[0]
-        #     max_sim = float(torch.max(similarities))
-            
-        #     if max_sim > threshold:
-        #         frame_scores.append({"idx": idx, "score": max_sim})
-
     # --- 2. TOP-K ANCHOR SELECTION ---
     frame_scores.sort(key=lambda x: x["score"], reverse=True)
     top_anchors = frame_scores[:top_k]
 
     if not top_anchors:
         logging.info(f"[WARNING] Zero hits at {threshold}. Falling back to Top-50 anchors above 0.18.")
-        top_anchors = [s for s in frame_scores if s["score"] >= thresh-0.03][:top_k]
+        top_anchors = [s for s in frame_scores if s["score"] >= threshold-0.03][:top_k]
         
     if not top_anchors:
         logging.info("[WARNING] CLIP Relevant Search Speedup Failed, Switching Back to Uniform Sampling")
