@@ -19,8 +19,9 @@ class PropertyChecker:
             threshold_of_probability=self.detection_threshold
         )
         self.stages = self._decompose_specification(specification)
-        
         print(f'[DEBUG] The specification stored in MODEL CHECKER IS {self.specification}')
+        print(f'[DEBUG] The symbolic rule stored in FrameValidator is {self.frame_validator.symbolic_verification_rule}')
+        print(f'[DEBUG] Stages decomposition: {self.stages}')
     def generate_specification(self, specification_raw):
         return f"P>={self.tl_satisfaction_threshold:.2f} [ {specification_raw} ]"
 
@@ -38,19 +39,18 @@ class PropertyChecker:
         return self.model_checker.validate_tl_specification(specification)
 
     def _decompose_specification(self, spec):
-        # Instead of stripping all parens, we split by the 'top-level' UNTILs
-        # In Stormpy format, these are the 'U' operators that aren't inside nested parens
-        # For simplicity, if we follow your 'Right-Nested' rule:
-        
+        # Determine if this is a sequence discovery (Relaxed) or order verification (Strict)
+        # If there is no 'U' (Until), we collapse into a single stage for global evidence
+        if " U " not in spec:
+            # One stage containing all unique propositions mentioned in the spec
+            all_props = [p for p in self.proposition if p in spec]
+            return [all_props] if all_props else []
+
+        # If 'U' is present, proceed with multi-stage decomposition for handover logic
         stages = []
-        # Logic: Find the strings between the 'U's
-        # "((A & B | C ) U (D U E))" -> ["A & B | C", "D U E"]
-        # Then we recursively handle "D U E" -> ["D", "E"]
-        
         parts = self._recursive_until_split(spec) 
         
         for part in parts:
-            # Group all propositions found in this temporal slice
             found = [p for p in self.proposition if p in part]
             if found:
                 stages.append(found)
@@ -73,9 +73,8 @@ class PropertyChecker:
     
     def _recursive_until_split(self, spec):
         spec = spec.strip()
-        # Remove outer-most surrounding parentheses if they enclose the whole spec
+        # 1. Remove outer-most balanced parentheses
         if spec.startswith('(') and spec.endswith(')'):
-            # Only strip if they are a matching pair for the whole string
             count = 0
             is_pair = True
             for i in range(len(spec)-1):
@@ -87,21 +86,19 @@ class PropertyChecker:
             if is_pair:
                 return self._recursive_until_split(spec[1:-1])
 
-        # Find the top-level ' U ' or ' & ' (when used for sequences)
+        # 2. Find ONLY the top-level ' U ' (Until)
         depth = 0
         split_idx = -1
         for i in range(len(spec)):
             if spec[i] == '(': depth += 1
             elif spec[i] == ')': depth -= 1
             elif depth == 0:
-                # Look for " U " (Until) or " & " (And)
+                # We ONLY split on Until to define temporal stages
                 if spec[i:i+3] == " U ":
                     split_idx = i
                     break
-                elif spec[i:i+3] == " & " and "EVENTUALLY" in spec:
-                    split_idx = i
-                    break
 
+        # 3. Recurse if a temporal boundary was found
         if split_idx != -1:
             left = spec[:split_idx].strip()
             right = spec[split_idx+3:].strip()

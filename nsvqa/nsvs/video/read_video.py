@@ -6,11 +6,11 @@ from sentence_transformers import util
 from PIL import Image
 import logging
 
-def get_relevant_frames_from_video(model, video_path, propositions, 
-                               threshold=0.23, sample_rate= 1, top_k=200, 
-                               merge_threshold_sec=3.0,
-                               window_padding = 1.0, 
-                               max_frames_per_segment=50, uniform_sample_size_limit=300):
+
+def read_video_stage1(model, video_path, propositions, 
+                               threshold=0.23, sample_rate=1, top_k=200, 
+                               merge_threshold_sec=3.0, window_padding=1.0, 
+                               max_frames_per_segment=50, uniform_sample_size_limit=240):
     """
     Refined Pipeline:
     1. Coarse CLIP Scan.
@@ -25,7 +25,7 @@ def get_relevant_frames_from_video(model, video_path, propositions,
     expected_uniform_count = int(duration_total * sample_rate)
     
     if expected_uniform_count <= uniform_sample_size_limit:
-        logging.info(f"[DEBUG] Video {video_path} is within budget ({expected_uniform_count} frames). Using Uniform Sampling.")
+        logging.info(f"[DEBUG] Video {video_path} is within limit ({expected_uniform_count} frames). Using Uniform Sampling.")
         # Uniform sampling logic
         step = int(max(1, fps / sample_rate))
         indices = list(range(0, frame_count - 1, step))
@@ -33,14 +33,17 @@ def get_relevant_frames_from_video(model, video_path, propositions,
         return {
             "images": [f for f in frames],
             "original_indices": indices,
-            "video_info": {"fps": fps, "frame_count": frame_count, "sample_rate": sample_rate}
+            "video_info": {"fps": fps, "frame_count": frame_count, "sample_rate": sample_rate},
+            "final_num_frames_sampled" : len(indices),
+            "video_sample_method" : "uniform",
+            "pct_final_num_from_uniform": round(len(indices) / expected_uniform_count, 4)
         }
 
     # --- TIER 2: CLIP RELEVANCE PIPELINE (For Long Videos) ---
     logging.info(f"[DEBUG] Video {video_path} exceeds budget. Initiating CLIP filtering.")
 
     # --- 1. COARSE SCAN (0.5 FPS) ---
-    CLIP_SCAN_HZ = 0.5
+    CLIP_SCAN_HZ = sample_rate
     scan_step = int(max(1, fps / CLIP_SCAN_HZ))
     coarse_indices = list(range(0, frame_count - 1, scan_step))
     coarse_frames = vr.get_batch(coarse_indices).asnumpy()
@@ -48,21 +51,23 @@ def get_relevant_frames_from_video(model, video_path, propositions,
     cleaned_props = []
     for p in propositions:
         clean = p.replace("subtitle_", "").replace("_", " ")
+        if clean.startswith("n_"):
+            clean = clean[2:]
         cleaned_props.append(clean)
 
     print(f"[DEBUG] Video {video_path} FPS {fps} Length {frame_count} Scanning {len(coarse_indices)} frames for {len(cleaned_props)} Proposition...\nSampled Frame: {coarse_indices}")
-
+    
+    print(f'[DEBUG] Max coarse index: {max(coarse_indices)}\nFrame Count: {frame_count}')
     prop_embeddings = model.encode(cleaned_props, convert_to_tensor=True)
     frame_scores = []
-
+    
     with torch.no_grad():
-        looper = tqdm.tqdm(enumerate(coarse_indices), total=len(coarse_indices))
-        for i, idx in looper:
-            # Encode frame and get best similarity across all propositions
-            frame_emb = model.encode(Image.fromarray(coarse_frames[i]), convert_to_tensor=True, show_progress_bar=False)
-            similarities = util.cos_sim(frame_emb, prop_embeddings)[0]
+        coarse_embs = model.encode([Image.fromarray(f) for f in coarse_frames], 
+                                   convert_to_tensor=True, show_progress_bar=True)
+        
+        for i, idx in enumerate(coarse_indices):
+            similarities = util.cos_sim(coarse_embs[i], prop_embeddings)[0]
             max_sim = float(torch.max(similarities))
-            
             if max_sim > threshold:
                 frame_scores.append({"idx": idx, "score": max_sim})
 
@@ -77,17 +82,21 @@ def get_relevant_frames_from_video(model, video_path, propositions,
     if not top_anchors:
         logging.info("[WARNING] CLIP Relevant Search Speedup Failed, Switching Back to Uniform Sampling")
         uniform_sample_count = int(duration_total * sample_rate)
-
+        sample_method = "uniform"
         if uniform_sample_count > uniform_sample_size_limit:
             logging.info(f"[WARNING] Video {video_path} not is within budget ({uniform_sample_count} frames). Using Uniform Samplin Limit: {uniform_sample_size_limit}.")
             uniform_sample_count = uniform_sample_size_limit
+            sample_method = f"uniform_limit_{uniform_sample_size_limit}"
 
-        indices = np.linspace(0, frame_count - 1, num=uniform_sample_size_limit, dtype=int).tolist()  
+        indices = np.linspace(0, frame_count - 1, num=uniform_sample_size_limit, dtype=int).tolist()   
         frames = vr.get_batch(indices).asnumpy()
         return {
             "images": frames,
             "original_indices": indices,
-            "video_info": {"fps": fps, "frame_count": frame_count, "sample_rate" : sample_rate}
+            "video_info": {"fps": fps, "frame_count": frame_count, "sample_rate" : sample_rate},
+            "final_num_frames_sampled" : len(indices),
+            "video_sample_method" : sample_method,
+            "pct_final_num_from_uniform": round(len(indices) / expected_uniform_count, 4)
         }
 
     # Convert anchors to time-windows (1s padding each side)
@@ -142,8 +151,128 @@ def get_relevant_frames_from_video(model, video_path, propositions,
     final_indices = sorted(list(set(final_indices)))
     flat_frames = vr.get_batch(final_indices).asnumpy()
     logging.info(f'[DEBUG] CLIP Complete!\nRetained Indices: {final_indices}\nLength: {len(final_indices)}')
+    
+    if True:
+            intial_num_sampled = len(coarse_indices)
+            stage1_num_sampled_after_merge = len(final_indices)
+            pct_stage1_from_full = round(stage1_num_sampled_after_merge / expected_uniform_count, 4)
+
+            clip_metrics = {
+                "expected_uniform_count" : expected_uniform_count,
+                "initial_num_frames_sampled" : intial_num_sampled,
+                "stage1_num_frames_retained" : stage1_num_sampled_after_merge,
+                "pct_stage1_from_uniform" : pct_stage1_from_full
+            }        
     return {
         "images": [f for f in flat_frames],
         "original_indices": final_indices,
-        "video_info": {"fps": fps, "frame_count": frame_count, "sample_rate" : sample_rate}
+        "video_info": {"fps": fps, "frame_count": frame_count, "sample_rate": sample_rate},
+        "video_sample_method": "two-stage clip",
+        "clip_metrics" : clip_metrics,
+        "final_num_frames_sampled" : len(final_indices),
+        "pct_final_num_from_uniform": round(len(final_indices) / expected_uniform_count, 4)
+    }
+
+def read_video_stage2(model, video_path, propositions, 
+                                     tau_r=0.95, sample_rate=1, 
+                                     uniform_sample_size_limit=240, threshold=0.23):
+    """
+    Simplified Pipeline:
+    1. Uniform Sampling: Pick frames at a constant FPS (sample_rate).
+    2. Embedding Calculation: Get CLIP embeddings for all uniform frames.
+    3. Visual Deduplication: Remove frames where cos_sim > tau_r compared to the last kept frame.
+    """
+    vr = VideoReader(video_path, ctx=cpu(0))
+    fps, frame_count = vr.get_avg_fps(), len(vr)
+    duration_total = frame_count / fps
+
+    # --- 1. UNIFORM SAMPLING ---
+    # Determine the step size based on the desired sample_rate (e.g., 1 frame per second)
+    step = int(max(1, fps / sample_rate))
+    uniform_indices = list(range(0, frame_count - 1, step))
+
+    expected_uniform_count = len(uniform_indices)
+    raw_frames = vr.get_batch(uniform_indices).asnumpy()
+
+    # --- 2. EMBEDDING CALCULATION ---
+    logging.info(f"[DEBUG] Calculating embeddings for {len(uniform_indices)} uniform frames.")
+    with torch.no_grad():
+        # Encode all uniformly sampled frames
+        frame_embs = model.encode([Image.fromarray(f) for f in raw_frames], 
+                                  convert_to_tensor=True, show_progress_bar=True)
+
+    # --- 3. SIMILARITY-BASED DEDUPLICATION ---
+    # We always keep the first frame
+    deduplicated_indices = [uniform_indices[0]]
+    last_kept_emb_idx = 0
+
+    for i in range(1, len(uniform_indices)):
+        # Compare current frame embedding to the last one we decided to keep
+        similarity = util.cos_sim(frame_embs[last_kept_emb_idx], frame_embs[i])
+        
+        # If similarity is below tau_r, the frame is "new" enough to keep
+        if similarity < tau_r:
+            deduplicated_indices.append(uniform_indices[i])
+            last_kept_emb_idx = i
+
+    logging.info(f"Deduplication complete. Retained {len(deduplicated_indices)} / {expected_uniform_count} frames.")
+
+    # --- 4. METRICS & RETURN ---
+    final_frames = vr.get_batch(deduplicated_indices).asnumpy()
+    
+    clip_metrics = {
+        "expected_uniform_count": expected_uniform_count,
+        "initial_num_frames_sampled" : expected_uniform_count,
+        "stage2_num_frames_retained": len(deduplicated_indices),
+        "pct_stage2_from_uniform": round(len(deduplicated_indices) / expected_uniform_count, 4) if expected_uniform_count > 0 else 0
+    }
+
+    return {
+        "images": [f for f in final_frames],
+        "original_indices": deduplicated_indices,
+        "video_info": {"fps": fps, "frame_count": frame_count, "sample_rate": sample_rate},
+        "video_sample_method": "uniform-deduplicated",
+        "clip_metrics": clip_metrics,
+        "final_num_frames_sampled": len(deduplicated_indices),
+        "pct_final_num_from_uniform": round(len(deduplicated_indices) / expected_uniform_count, 4)
+    }
+
+def read_video_uniform(model, video_path, propositions, 
+                                sample_rate=1, threshold=0.23):
+    """
+    Ablation Baseline:
+    1. Uniform Sampling: Pick frames strictly at a constant sample_rate.
+    2. No CLIP embeddings or deduplication performed.
+    """
+    print('[DEBUG] Using Naive Uniform Sampling')
+    vr = VideoReader(video_path, ctx=cpu(0))
+    fps, frame_count = vr.get_avg_fps(), len(vr)
+
+    # --- 1. STRICT UNIFORM SAMPLING ---
+    # Calculate step based on frames per second and desired sample rate
+    step = int(max(1, fps / sample_rate))
+    uniform_indices = list(range(0, frame_count - 1, step))
+
+    # Efficiently load frames using Decord's batch getter
+    final_frames = vr.get_batch(uniform_indices).asnumpy()
+    
+    num_frames = len(uniform_indices)
+
+    # --- 2. METRICS & RETURN ---
+    # Maintain identical structure for comparability in ablation scripts
+    clip_metrics = {
+        "expected_uniform_count": num_frames,
+        "initial_num_frames_sampled" : num_frames,
+        "num_frames_retained": num_frames, # No reduction in baseline
+        "pct_from_uniform": 1.0 
+    }
+    print(f'[DEBUG] Using Naive Uniform Sampling\nSampling Complete! Total Length {num_frames}')
+    return {
+        "images": [f for f in final_frames],
+        "original_indices": uniform_indices,
+        "video_info": {"fps": fps, "frame_count": frame_count, "sample_rate": sample_rate},
+        "video_sample_method": "baseline-uniform",
+        "clip_metrics": clip_metrics,
+        "final_num_frames_sampled": num_frames,
+        "pct_final_num_from_uniform": 1.0
     }

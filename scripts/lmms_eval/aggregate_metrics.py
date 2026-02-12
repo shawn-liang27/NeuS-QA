@@ -5,7 +5,32 @@ from pathlib import Path
 from collections import defaultdict
 import pandas as pd
 
-def get_dataframe(raw_results, num_of_frame_in_sequence, out_dir):
+BENCHMARK_NAME = {
+    "video_mme": [
+        "video_id",
+        "question_id",
+        "id",
+        "duration_group",
+        "domain",
+        "sub_category",
+        "task_type"
+    ],
+    "lvb": [
+        "video_id",
+        "id",
+        "position",
+        "question_wo_referring_query",
+        "topic_category",
+        "question_category",
+        "level",
+        "duration_group",
+        "starting_timestamp_for_subtitles",
+        "duration",
+        "view_count"
+    ]
+}
+
+def get_dataframe(raw_results, benchmark_name, out_dir):
     """
     raw_results: list of { "category": str, "time_metrics": dict }
     time_metrics dict format:
@@ -24,15 +49,13 @@ def get_dataframe(raw_results, num_of_frame_in_sequence, out_dir):
         "num_model_checks" : int,
         "num_vlm_detections" : int
     """
+    assert benchmark_name in BENCHMARK_NAME, f"'{benchmark_name}' is not a known benchmark"
+    metadata_list = BENCHMARK_NAME[benchmark_name]
     metric_list = []
     for result in raw_results:
         metrics = result["time_metrics"]
-        metrics["id"] = result["metadata"]["id"]
-        metrics["question_category"] = result["metadata"]["question_category"]
-        metrics["duration_group"] = result["metadata"]["duration_group"]
-        metrics["fps"] = result["metadata"]["fps"]
-        metrics["duration"] = result["metadata"]["duration"]
-        metrics["num_of_frame_in_sequence"] = num_of_frame_in_sequence
+        for metadata in metadata_list:
+            metrics[metadata] = result["metadata"][metadata]
         metric_list.append(metrics)
     df = pd.DataFrame(metric_list)
     df.to_csv(f'{out_dir}/metric_data.csv', index=False)
@@ -74,7 +97,6 @@ def aggregate_metrics(raw_results, is_naive):
 
     # 2. Single-pass Accumulation
     for entry in raw_results:
-        duration = entry["metadata"]["duration"]
         frame_count = entry["metadata"]["frame_count"]
         fps = entry["metadata"]["fps"]
         foi = entry["frames_of_interest"]
@@ -170,7 +192,7 @@ def aggregate_metrics(raw_results, is_naive):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("nsvs_result_dir")
-    parser.add_argument("frames_window", type=int, default=3)
+    parser.add_argument("benchmark_name", type=str, default="lvb")
     parser.add_argument("--naive", action="store_true")
     args = parser.parse_args()
     nsvs_result_dir = args.nsvs_result_dir
@@ -185,7 +207,7 @@ def main():
             raw_res.extend(out)
     
     metrics = aggregate_metrics(raw_res, args.naive)
-    get_dataframe(raw_res, args.frames_window, nsvs_result_dir)
+    get_dataframe(raw_res, args.benchmark_name, nsvs_result_dir)
     print(metrics)
 
     with open(out_file, "w") as f:

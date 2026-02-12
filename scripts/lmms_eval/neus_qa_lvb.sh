@@ -5,16 +5,25 @@ JOB_DIR="$HOME/NeuS-VLM/NeuS-QA"
 JOB_ID=$(date +%Y%m%d_%H%M%S)
 
 export HF_HOME="$HOME/.cache/huggingface"
+export DECORD_EOF_RETRY_MAX=40960
+
+TOTAL_SPLITS=1
+GPU_START=$1
+RUN_NUMBER=$2
+export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 
 # Variables
 DATA_DIR="/usr/homes/sgl57/.data/LongVideoBench"
 # BURNED_DIR="/usr/homes/sgl57/.data/LongVideoBench/burn-subtitles/T3E_E3E_T3O_O3O_mix"
 BURNED_DIR="/usr/homes/sgl57/.data/LongVideoBench/burn-subtitles/T3E_E3E_T3O_O3O_mix_2026_01_14_21_55"
 MODEL="InternVL2-8B"
+MAX_TOKEN_LEN=65000
 
 CATEGORIES=("T3E" "E3E" "T3O" "O3O") # "T3E", "E3E", "T3O", "O3O"
 CAT_STR=$(IFS='_'; echo "${CATEGORIES[*]}")
-OUT_DIR="$JOB_DIR/experiment_results/nsvs/naive_neus_baseline/"${MODEL//\//_}"/nsvs_qa_${CAT_STR}_${JOB_ID}"
+
+OUT_DIR="$JOB_DIR/experiment_results/neusqa/longvideobench/experiment_${RUN_NUMBER}"
+CONFIG_FILE="/usr/homes/sgl57/NeuS-VLM/NeuS-QA/experiment_results/neusqa/config.json"
 
 mkdir -p "$OUT_DIR"
 
@@ -29,13 +38,7 @@ source .venv/bin/activate
 set -a
 source .ENV
 set +a
-# =========================================================
-# CONFIGURATION
-# =========================================================
-TOTAL_SPLITS=8  # Set this to your number of GPUs
-GPU_START=$1
-FRAME_WINDOW=$2
-export CUDA_VISIBLE_DEVICE=0,1,2,3,4,5,6,7
+
 # =========================================================
 # FUNCTION: Worker Logic (Runs in Parallel)
 # =========================================================
@@ -46,10 +49,10 @@ launch_worker() {
     # Unique log files for this worker
     local WORKER_LOG="${LOG_DIR}/worker_${SPLIT_ID}"
 
-    echo ">>> [Worker $SPLIT_ID] Server Ready. Running Python script..."
+    echo ">>> [Worker $SPLIT_ID] Ready. Running Python script..."
     local START_TIME=$(date +%s)
 
-    python -u scripts/lmms_eval/nsvs_only_mutil_operators.py \
+    python -u scripts/lmms_eval/nsvs_only_ablation.py \
         --vlm_model_name "${MODEL}" \
         --port_number "${GPU_ID}" \
         --data_dir "${DATA_DIR}" \
@@ -58,8 +61,9 @@ launch_worker() {
         --current_split "${SPLIT_ID}" \
         --total_splits "${TOTAL_SPLITS}" \
         --categories "${CATEGORIES[@]}" \
-        --frame_window ${FRAME_WINDOW} \
-        --measure_metrics > "${WORKER_LOG}_eval.out" 2>&1
+        --config "${CONFIG_FILE}" \
+        --measure_metrics \
+        >"${WORKER_LOG}_eval.out" 2>&1
 
     local PY_EXIT=$?
     
@@ -81,12 +85,6 @@ launch_worker() {
 # =========================================================
 # MAIN LOOP: Spawn Workers
 # =========================================================
-
-# export CUDA_LAUNCH_BLOCKING=1
-# export PYTHONUNBUFFERED=1
-# export TORCH_SHOW_CPP_STACKTRACES=1
-# export TORCH_DISABLE_ADDR2LINE=1
-
 trap 'echo ">>> Killing all workers..."; kill $(jobs -p); exit' SIGINT SIGTERM
 
 for (( i=1; i<=TOTAL_SPLITS; i++ ))
@@ -101,9 +99,6 @@ do
     sleep 5
 done
 
-# =========================================================
-# WAIT
-# =========================================================
 echo ">>> All workers launched. Waiting for completion..."
 wait
 echo ">>> All jobs finished."

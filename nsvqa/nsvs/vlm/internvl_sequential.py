@@ -15,10 +15,12 @@ from nsvqa.utils.sigmoid import calibrate_sigmoid
 from nsvqa.nsvs.vlm.obj import DetectedObject
 import transformers
 import traceback
+import sys
 
 logging.basicConfig(level=logging.INFO)
 
-class InternVL:
+
+class InternVLSequential:
     """InternVL's Vision Language Model."""
 
     def __init__(
@@ -26,8 +28,7 @@ class InternVL:
         model_name: str = "InternVL2-8B",
         multi_gpus: bool = False,
         device: int = 0,
-        max_patch: int = 6,
-
+        max_patch: int = 6
     ) -> None:
         """Initialization the InternVL."""
         logging.info(
@@ -52,9 +53,7 @@ class InternVL:
             attn_implementation="flash_attention_2",
             trust_remote_code=True,
             device_map=device_map,
-        )
-        self.model.apply(self.move_tensors_to_gpu)
-        self.model.eval()
+        ).eval()
         self.max_patch = max_patch
         self.model.config.max_dynamic_patch = self.max_patch
         logging.info(f"Using dynamic batch {self.model.config.max_dynamic_patch}")
@@ -96,77 +95,72 @@ class InternVL:
             if param.device.type == "cpu":
                 param.data = param.data.cuda(self.device)
 
-    def batch_detect(
+    def detect(
         self,
         seq_of_frames: list[np.ndarray],
-        scene_descriptions: list[str],
+        scene_description: str,
         threshold: float
-    ) -> [DetectedObject]: # pyright: ignore[reportInvalidTypeForm]
+    ) -> DetectedObject:
         """Detect objects in the given frame image.
 
         Args:
             seq_of_frames (list[np.ndarray]): List of video frames to process.
-            scene_descriptions (list[str]): Description of the scene.
+            scene_description (str): Description of the scene.
             threshold (float): Detection threshold.
 
         Returns:
             DetectedObject: Detected objects with their details.
         """
-        task_items = []
-        for scene_description in scene_descriptions:
-            if "subtitle" in scene_description:
-                subtitle_scene_description = scene_description.replace("subtitle_", "").replace("_", " ")
-                parsing_rule = "You must only return a Yes or No, and not both, to any question asked. You must not include any other symbols, information, text, justification in your answer or repeat Yes or No multiple times. For example, if the question is \"Does the video have the subtitle 'this is very interesting' present in the sequence of images?\", the answer must only be 'Yes' or 'No'."
-                prompt = rf"Does the video have the subtitle '{subtitle_scene_description}' present in the sequence of images? " f"\n[PARSING RULE]: {parsing_rule}"
-            else:
-                if scene_description.startswith("n_"):
-                    scene_description = scene_description[2:]
-                object_scene_description = scene_description.replace("_", " ")
-                parsing_rule = "You must only return a Yes or No, and not both, to any question asked. You must not include any other symbols, information, text, justification in your answer or repeat Yes or No multiple times. For example, if the question is \"Is there a cat present in the sequence of images?\", the answer must only be 'Yes' or 'No'."
-                prompt = rf"Is there a '{object_scene_description}' present in the sequence of images? " f"\n[PARSING RULE]: {parsing_rule}"
-            task_items.append({
-                "name": scene_description,
-                "prompt": prompt
-            })
-
-        prompts = [item["prompt"] for item in task_items]
-
+        if "subtitle" in scene_description:
+            subtitle_scene_description = scene_description.replace("subtitle_", "").replace("_", " ")
+            parsing_rule = "You must only return a Yes or No, and not both, to any question asked. You must not include any other symbols, information, text, justification in your answer or repeat Yes or No multiple times. For example, if the question is \"Does the video have the subtitle 'this is very interesting' present in the sequence of images?\", the answer must only be 'Yes' or 'No'."
+            prompt = rf"Does the video have the subtitle '{subtitle_scene_description}' present in the sequence of images? " f"\n[PARSING RULE]: {parsing_rule}"
+        else:
+            object_scene_description = scene_description.replace("_", " ")
+            parsing_rule = "You must only return a Yes or No, and not both, to any question asked. You must not include any other symbols, information, text, justification in your answer or repeat Yes or No multiple times. For example, if the question is \"Is there a cat present in the sequence of images?\", the answer must only be 'Yes' or 'No'."
+            prompt = rf"Is there a '{object_scene_description}' present in the sequence of images? " f"\n[PARSING RULE]: {parsing_rule}"
+        
         try:
-            responses, confidences = self.infer_with_video_confidence_batch(
-                languages=prompts,        # List of questions
-                seq_of_frames=seq_of_frames # The batch of frames
+            # The Crash Site
+            response, confidence = self.infer_with_video_confidence(
+                language=prompt,
+                seq_of_frames=seq_of_frames,
             )
-        except Exception as e:
-            logging.info(f"CRITICAL ERROR: {e}")
+        except RuntimeError as e:
+            # Catch CUDA errors specifically and scream about it
+            if "out of memory" in str(e).lower():
+                logging.info(f"\n\nCRITICAL: CUDA OUT OF MEMORY FAILURE!", flush=True)
+                logging.info(f"Your GPU ran out of RAM while processing {len(seq_of_frames)} frames.", flush=True)
+                logging.info(f"Try reducing frames or 'max_dynamic_patch'.\n", flush=True)
+            else:
+                logging.info(f"\n\nCRITICAL RUNTIME ERROR: {e}", flush=True)
+            
+            # Re-raise so the script actually stops and you can see the traceback
             raise e
 
-        detected_objects = []
-        for item, response, confidence in zip(task_items, responses, confidences):
-            detected = "yes" in response.lower()
-            
-            probability = calibrate_sigmoid(confidence, false_threshold=threshold)
-            
-            obj = DetectedObject(
-                name=item["name"],
-                is_detected=detected,
-                confidence=round(confidence, 3),
-                probability=round(probability, 3),
-            )
-            detected_objects.append(obj)
+        # logging.info(f"\nDetect is successful, VLM response is: {response}")
 
-        return detected_objects
+        detected = "yes" in response.lower()
+        probability = calibrate_sigmoid(confidence, false_threshold=threshold)
 
-    def infer_with_video_confidence_batch(
+        return DetectedObject(
+            name=scene_description,
+            is_detected=detected,
+            confidence=round(confidence, 3),
+            probability=round(probability, 3),
+        )
+
+    def infer_with_video_confidence(
         self,
-        languages: list[str],
+        language: str,
         seq_of_frames: list[np.ndarray],
-        max_new_tokens: int = 128,
+        max_new_tokens: int = 1024,
         do_sample: bool = True,
     ) -> tuple[str, float]:
         """Perform video inference and return response with confidence score.
 
         Args:
-            language (list[str]): The input prompt or question.
+            language (str): The input prompt or question.
             seq_of_frames (list[np.ndarray] | None):
                 List of video frames as numpy arrays.
             video_path (str | None): Path to the input video file.
@@ -174,146 +168,145 @@ class InternVL:
             do_sample (bool): Whether to use sampling for generation.
 
         Returns:
-            list[tuple[str, float]]: Generated response and confidence score.
+            tuple[str, float]: Generated response and confidence score.
         """
 
         generation_config = {
             "max_new_tokens": max_new_tokens,
-            "do_sample": do_sample,
+            "do_sample": False,
         }
 
         pixel_values, num_patches_list = load_video_from_seq_of_frames(
-            seq_of_frames=seq_of_frames, device=self.device, max_num=self.max_patch
+            seq_of_frames=seq_of_frames, device=self.device, max_num=1
         )
 
-        num_questions = len(languages)
-
-        batch_num_patches_list = num_patches_list * num_questions
-
         video_prefix = "".join([f"Frame{i+1}: <image>\n" for i in range(len(num_patches_list))])
-        batched_prompts = [video_prefix + lang for lang in languages]
-
-        return self.batch_chat(
+        language = video_prefix + language
+        return self.chat_with_confidence(
             self.tokenizer,
             pixel_values,
-            batched_prompts,
+            language,
             generation_config,
-            num_patches_list=batch_num_patches_list,
+            num_patches_list=num_patches_list,
             verbose=False
         )
 
-    def batch_chat(self, tokenizer, pixel_values, questions, generation_config, num_patches_list=None,
-                   history=None, return_history=False, IMG_START_TOKEN='<img>', IMG_END_TOKEN='</img>',
-                   IMG_CONTEXT_TOKEN='<IMG_CONTEXT>', verbose=False, image_counts=None):
+    def chat_with_confidence(
+        self,
+        tokenizer: AutoTokenizer,
+        pixel_values: torch.Tensor,
+        question: str,
+        generation_config: dict,
+        num_patches_list: list[int] | None = None,
+        IMG_START_TOKEN: str = "<img>",
+        IMG_END_TOKEN: str = "</img>",
+        IMG_CONTEXT_TOKEN: str = "<IMG_CONTEXT>",
+        verbose: bool = False,
+    ) -> tuple[str, float]:
+        """Generate a response with confidence score for the given input.
+
+        Args:
+            tokenizer: The tokenizer to use.
+            pixel_values: Image tensor input.
+            question: The input question or prompt.
+            generation_config: Configuration for text generation.
+            num_patches_list: List of number of patches for video frames.
+            IMG_START_TOKEN: Token to mark the start of an image.
+            IMG_END_TOKEN: Token to mark the end of an image.
+            IMG_CONTEXT_TOKEN: Token for image context.
+            verbose: Whether to print verbose output.
+
+        Returns:
+            A tuple containing the generated response and its confidence score.
+        """
         
-        if history is not None or return_history:
-            print('Now multi-turn chat is not supported in batch_chat.')
-            raise NotImplementedError
+        if num_patches_list is None:
+            num_patches_list = [pixel_values.shape[0]] if pixel_values is not None else []
 
-        if image_counts is not None:
-            num_patches_list = image_counts
-            print('Warning: `image_counts` is deprecated. Please use `num_patches_list` instead.')
+        assert pixel_values is None or len(pixel_values) == sum(num_patches_list)
 
+        if hasattr(self.model, "vision_model"):
+            # Get the exact device of the first layer (Vision Embedding)
+            target_device = self.model.vision_model.embeddings.patch_embedding.weight.device
+        else:
+            target_device = self.model.device
+        
+        if verbose:
+            logging.info(f"DEBUG: Aligning inputs to Model Device: {target_device}")
+
+        # 1. H200 FIX: Hardware requires contiguous memory & Correct Device
+        if pixel_values is not None:
+            # MOVE TO TARGET DEVICE
+            pixel_values = pixel_values.to(target_device).to(self.model.dtype)
+            if not pixel_values.is_contiguous():
+                pixel_values = pixel_values.contiguous()
+            # THE SANITIZER: Scrub bad data
+            if torch.isnan(pixel_values).any() or torch.isinf(pixel_values).any():
+                print("CRITICAL: Found NaNs/Infs in video! Scrubbing data...", flush=True)
+                pixel_values = torch.nan_to_num(pixel_values, nan=0.0, posinf=1.0, neginf=-1.0)
+                
         img_context_token_id = tokenizer.convert_tokens_to_ids(IMG_CONTEXT_TOKEN)
         self.model.img_context_token_id = img_context_token_id
-    
+
+        template = copy.deepcopy(self.model.conv_template)
+        template.system_message = self.model.system_message
+        eos_token_id = tokenizer.convert_tokens_to_ids(template.sep)
+
+        template.append_message(template.roles[0], question)
+        template.append_message(template.roles[1], None)
+        query = template.get_prompt()
+
         if verbose and pixel_values is not None:
             image_bs = pixel_values.shape[0]
-            print(f'dynamic ViT batch size: {image_bs}')
+            print(f"dynamic ViT batch size: {image_bs}")
+        
+        for num_patches in num_patches_list:
+            context_tokens = IMG_CONTEXT_TOKEN * self.model.num_image_token * num_patches
+            image_tokens = IMG_START_TOKEN + context_tokens + IMG_END_TOKEN
+            query = query.replace("<image>", image_tokens, 1)
 
-        queries = []
-        total_patches_idx = 0
-        for question in questions:
-            template = copy.deepcopy(self.model.conv_template)
-            template.system_message = self.model.system_message
-            template.append_message(template.roles[0], question)
-            template.append_message(template.roles[1], None)
-            query = template.get_prompt()
-
-            num_images_this_question = query.count('<image>')
-            for _ in range(num_images_this_question):
-                num_patches = num_patches_list[total_patches_idx]
-                context_tokens = IMG_CONTEXT_TOKEN * self.model.num_image_token * num_patches
-                image_tokens = IMG_START_TOKEN + context_tokens + IMG_END_TOKEN
-                query = query.replace("<image>", image_tokens, 1)
-                total_patches_idx += 1
-            queries.append(query)
-
-        tokenizer.padding_side = 'left'
-        model_inputs = tokenizer(queries, return_tensors='pt', padding=True, add_special_tokens=False)
-        input_ids = model_inputs['input_ids'].to(self.device)
-        attention_mask = model_inputs['attention_mask'].to(self.device)
-
-        eos_token_id = tokenizer.convert_tokens_to_ids(template.sep.strip())
-        generation_config['do_sample'] = False
-        generation_config['eos_token_id'] = eos_token_id
-        generation_config["return_dict_in_generate"] = True
-        generation_config["min_new_tokens"] = 1
+        model_inputs = tokenizer(query, return_tensors="pt")
+        input_ids = model_inputs["input_ids"].to(target_device)
+        attention_mask = model_inputs["attention_mask"].to(target_device)
+        generation_config["eos_token_id"] = eos_token_id
         generation_config["return_dict_in_generate"] = True
         generation_config["output_scores"] = True
-        generation_config["pad_token_id"] = tokenizer.pad_token_id
+        generation_config["output_logits"] = True
+
+        if verbose:
+            print(f"DEBUG: Looking for Token ID: {self.model.img_context_token_id}")
+            count = (input_ids == self.model.img_context_token_id).sum().item()
+            logging.info(f"DEBUG: Found {count} image tokens.")
         
-        hidden_dim = self.model.language_model.config.hidden_size
+            if count == 0:
+                print("CRITICAL: Tokenizer split the special token string! Model has nowhere to put image features.")
+            # Wrap ONLY the generate call
+            print("DEBUG: Calling generate NOW...", flush=True)
 
-        # 1. Extract features: Shape [3, 256, hidden_dim]
-        with torch.no_grad():
-            single_window_features = self.model.extract_feature(pixel_values)
-
-        # 2. Reshape to a single block: [1, 3 * 256, hidden_dim]
-        # We use -1 for the middle dimension so it automatically handles any number of patches
-        visual_block = single_window_features.view(1, -1, hidden_dim)
-
-        # 3. Expand to batch size
-        batch_size = len(questions)
-        expanded_features = visual_block.expand(batch_size, -1, -1).contiguous()
-
-        try:     
+        try:
             generation_output = self.model.generate(
-                pixel_values=pixel_values[0:1], # Passes a single image's worth of pixel data
-                visual_features=expanded_features, # Passes the 10-batch of features
+                pixel_values=pixel_values,
                 input_ids=input_ids,
                 attention_mask=attention_mask,
-                **generation_config
+                **generation_config,
             )
-
         except Exception as e:
-            print(f"ERROR during generate: {e}")
+            # Force print any hidden Python errors
             import traceback
             traceback.print_exc()
+            sys.exit(1)
+    
+        response = tokenizer.batch_decode(generation_output.sequences, skip_special_tokens=True)[0]
+        response = response.split(template.sep)[0].strip()
 
-        gen_sequences = generation_output.sequences 
+        confidence = 1.0
 
-        responses = tokenizer.batch_decode(generation_output.sequences, skip_special_tokens=True)
-        responses = [response.split(template.sep.strip())[0].strip().rstrip('.').strip() for response in responses]
-
-        # 3. Calculate Confidence Scores
-        batch_confidences = []
-        for b in range(gen_sequences.shape[0]):
-            item_tokens = gen_sequences[b]
-            token_probs = []
-            
-            # Align each generated token with its corresponding score/logit
-            for step_idx in range(len(item_tokens)):
-                if step_idx >= len(generation_output.scores):
-                    break
-                    
-                token_id = item_tokens[step_idx].item()
-                
-                # Stop probability calculation at EOS or Separator
-                if token_id == tokenizer.eos_token_id:
-                    break
-                    
-                logits = generation_output.scores[step_idx][b]
-                probs = torch.softmax(logits, dim=-1)
-                token_probs.append(probs[token_id].item())
-            
-            # Geometric mean for stability; fallback to 0.0 if no tokens produced
-            if token_probs:
-                conf = np.exp(np.mean(np.log(np.array(token_probs) + 1e-9)))
-                batch_confidences.append(float(conf))
-            else:
-                batch_confidences.append(0.0)
-        return responses, batch_confidences
+        logits_to_compute = np.where(generation_output.sequences[0].detach().cpu().numpy() != eos_token_id)[0]
+        for logit in logits_to_compute:
+            token = generation_output.sequences[0, logit].item()
+            prob = softmax(generation_output.logits[logit])[0, token]
+            confidence = prob.item() * confidence
+        return response, confidence
 
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
@@ -497,7 +490,7 @@ def load_video_from_seq_of_frames(
         pixel_values = torch.stack(pixel_values).to(dtype=dtype, device=device)  # Convert to bfloat16
         num_patches_list.append(pixel_values.shape[0])
         pixel_values_list.append(pixel_values)
-    return torch.cat(pixel_values_list, dim=0), num_patches_list
+    return torch.cat(pixel_values_list), num_patches_list
 
 
 def load_video(video_path, bound=None, input_size=448, max_num=1, num_segments=32):

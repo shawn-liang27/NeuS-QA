@@ -1,25 +1,25 @@
-
 #!/bin/bash
 set -euo pipefail
-
-TOTAL_SPLITS=5  # Set this to your number of GPUs
-CURRENT_SPLIT=$1
-GPU=$2
 
 JOB_DIR="$HOME/NeuS-VLM/NeuS-QA"
 JOB_ID=$(date +%Y%m%d_%H%M%S)
 
 export HF_HOME="$HOME/.cache/huggingface"
+export DECORD_EOF_RETRY_MAX=40960
 
 # Variables
-# DATA_DIR="/usr/homes/sgl57/.data/LongVideoBench"
-DATA_DIR="/usr/homes/sgl57/.data/Video-MME"
-BURNED_DIR="/usr/homes/sgl57/.data/Video-MME/burn-subtitles"
+TOTAL_SPLITS=8  # Set this to your number of GPUs
+GPU_START=$1
+LABEL="Elaborative Propositions"
+BENCHMARK=mlvu
+export CUDA_VISIBLE_DEVICE=0,1,2,3,4,5,6,7
+DATA_DIR="/usr/homes/sgl57/.data/mlvu/MLVU"
+BURNED_DIR="/usr/homes/sgl57/.data/mlvu/MLVU"
 MODEL="InternVL2-8B"
 
-CATEGORIES=("Temporal Perception" "Spatial Perception" "Attribute Perception" "Action Recognition" "Object Recognition" "OCR Problems" "Temporal Reasoning" "Spatial Reasoning" "Object Reasoning" "Information Synopsis")
+CATEGORIES=("2_needle" "3_ego")
 CAT_STR=$(IFS='_'; echo "${CATEGORIES[*]}")
-OUT_DIR="$JOB_DIR/experiment_results/nsvs_improved/video_mme_trial/video_mme_split${CURRENT_SPLIT}_${JOB_ID}"
+OUT_DIR="$JOB_DIR/experiment_results/nsvs_improved/mlvu/mlvu_${JOB_ID}"
 
 mkdir -p "$OUT_DIR"
 
@@ -34,6 +34,9 @@ source .venv/bin/activate
 set -a
 source .ENV
 set +a
+# =========================================================
+# CONFIGURATION
+# =========================================================
 
 # =========================================================
 # FUNCTION: Worker Logic (Runs in Parallel)
@@ -57,6 +60,7 @@ launch_worker() {
         --current_split "${SPLIT_ID}" \
         --total_splits "${TOTAL_SPLITS}" \
         --categories "${CATEGORIES[@]}" \
+        --benchmark "${BENCHMARK}" \
         --measure_metrics > "${WORKER_LOG}_eval.out" 2>&1
 
     local PY_EXIT=$?
@@ -76,10 +80,28 @@ launch_worker() {
     echo ">>> [Worker $SPLIT_ID] Finished (Exit Code: $PY_EXIT) in ${HOURS}h ${MINS}m ${SECS}s. Stopping server..." >> "${WORKER_LOG}_eval.out"
 }
 
+# =========================================================
+# MAIN LOOP: Spawn Workers
+# =========================================================
+
+# export CUDA_LAUNCH_BLOCKING=1
+# export PYTHONUNBUFFERED=1
+# export TORCH_SHOW_CPP_STACKTRACES=1
+# export TORCH_DISABLE_ADDR2LINE=1
+
 trap 'echo ">>> Killing all workers..."; kill $(jobs -p); exit' SIGINT SIGTERM
 
-
-launch_worker $MODEL $CURRENT_SPLIT $GPU &
+for (( i=1; i<=TOTAL_SPLITS; i++ ))
+do
+    # Calculate GPU ID (0-based) from Split ID (1-based)
+    GPU_ID=$(($GPU_START + (i-1)))
+    
+    # Launch function in background
+    launch_worker $MODEL $i $GPU_ID &
+    
+    # Small sleep to prevent all 4 servers from spiking CPU/Disk at the exact same millisecond
+    sleep 5
+done
 
 # =========================================================
 # WAIT

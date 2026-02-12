@@ -8,7 +8,7 @@ You are a Video Temporal Grounding Agent. Your task is to expand an identified t
 ### BUFFER RULES:
   - "after": Use [start_time, end_time + 10]
   - "before": Use [start_time - 10, end_time]
-  - "during": Use [start_time - 3, end_time + 3]
+  - "during": Use [start_time - 5, end_time + 5]
   * Note: All target windows MUST fully contain the original [start_time, end_time].
 
 ### QUESTION FORMATTING:

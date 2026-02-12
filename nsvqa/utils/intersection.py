@@ -36,22 +36,20 @@ def group_with_gaps(nums, max_gaps=2):
     groups.append(current_group)
     return groups
 
-def intersection_with_gaps(indices, max_gaps=8): 
-    non_empty = [set(s) for s in indices if s]
-    
-    if not non_empty:
-        return []
-    if len(non_empty) == 1:
-        combined = sorted(list(non_empty[0]))
-    else:
-        intersected = set.intersection(*non_empty)
-        combined = sorted(list(intersected))
+def intersection_with_gaps(indices, max_gaps=8): # smart set intersection
+    if len(non_empty := [s for s in indices if s]) == 1:
+        return list(non_empty[0])
 
-    if not combined:
-        return []
+    A = set(indices[0])
+    B = set(indices[1])
+    combined = sorted(list(A | B))
 
-    groups = group_with_gaps(combined, max_gaps)
-    return max(groups, key=len) if groups else []
+    largest_set = []
+    for group in group_with_gaps(combined, max_gaps):
+        if len(group) > len(largest_set):
+            largest_set = group
+
+    return largest_set
 
 
 def find_soft_handover(p_indices, q_indices, tolerance_frames):
@@ -123,7 +121,7 @@ def reconcile_sparse_ltl(video_info, p_indices, q_indices, automaton_foi, target
     return final_foi_groups
 
 def reconcile_dynamic_ltl(video_info, all_detections, automaton_foi, target_window_before, target_window_after,
-                          BRIDGE_MULT=30, CONTEXT_SECONDS=5, TOLERANCE=8):
+                          BRIDGE_MULT=5, CONTEXT_SECONDS=5, TOLERANCE=8):
     """
     Handles N-stage sequential handovers (0->1, 1->2, ... N-1->N)
     to identify Frames of Interest (FOI) across a complex LTL chain.
@@ -142,33 +140,46 @@ def reconcile_dynamic_ltl(video_info, all_detections, automaton_foi, target_wind
 
     # Iterate through each temporal transition (Stage i -> Stage i+1)
     # If all_detections has 3 sets, we check (0,1) and (1,2)
-    for i in range(len(all_detections) - 1):
-        p_indices = all_detections[i]
-        q_indices = all_detections[i+1]
-
-        if not p_indices or not q_indices:
-            continue
-
-        # Find where Stage i hands over to Stage i+1
-        handover_all = find_soft_handover(p_indices, q_indices, tolerance)
-
-        if handover_all:
-            handover_sorted = sorted(list(handover_all))
-            # Group handover points into clusters to find distinct event boundaries
-            handover_clusters = group_with_gaps(handover_sorted, max_gaps=MAX_GAPS)
+    if len(all_detections) == 1:
+        stage_1 = sorted(list(all_detections[0]))
+        segments = group_with_gaps(stage_1, max_gaps=MAX_GAPS)
+        for cluster in segments:
+            t_start = min(cluster)
+            t_end = max(cluster)
             
-            for cluster in handover_clusters:
-                t_start = min(cluster)
-                t_end = max(cluster)
+            event_before = {idx for idx in stage_1 if (t_start - max(WINDOW, int(target_window_before / 2) * fps)) <= idx <= t_end}
+            event_after = {idx for idx in stage_1 if t_start <= idx <= (t_end + max(WINDOW, int(target_window_after / 2) * fps))}
+            
+            valid_segments.update(event_before)
+            valid_segments.update(event_after)
+    else:
+        for i in range(len(all_detections) - 1):
+            p_indices = all_detections[i]
+            q_indices = all_detections[i+1]
+
+            if not p_indices or not q_indices:
+                continue
+
+            # Find where Stage i hands over to Stage i+1
+            handover_all = find_soft_handover(p_indices, q_indices, tolerance)
+
+            if handover_all:
+                handover_sorted = sorted(list(handover_all))
+                # Group handover points into clusters to find distinct event boundaries
+                handover_clusters = group_with_gaps(handover_sorted, max_gaps=MAX_GAPS)
                 
-                # Capture context around the transition
-                # event_p: Context before and during the handover
-                event_p = {idx for idx in p_indices if (t_start - max(WINDOW, target_window_before)) <= idx <= t_end}
-                # event_q: Context during and after the handover
-                event_q = {idx for idx in q_indices if t_start <= idx <= (t_end + max(WINDOW, target_window_after))}
-                
-                valid_segments.update(event_p)
-                valid_segments.update(event_q)
+                for cluster in handover_clusters:
+                    t_start = min(cluster)
+                    t_end = max(cluster)
+                    
+                    # Capture context around the transition
+                    # event_p: Context before and during the handover
+                    event_p = {idx for idx in p_indices if (t_start - max(WINDOW, target_window_before)) <= idx <= t_end}
+                    # event_q: Context during and after the handover
+                    event_q = {idx for idx in q_indices if t_start <= idx <= (t_end + max(WINDOW, target_window_after))}
+                    
+                    valid_segments.update(event_p)
+                    valid_segments.update(event_q)
 
     # Union the segments identified by handovers with the automaton's path
     final_set.update(valid_segments)
@@ -184,5 +195,4 @@ def reconcile_dynamic_ltl(video_info, all_detections, automaton_foi, target_wind
     final_foi_groups = group_with_gaps(sorted(list(final_set)), max_gaps=MAX_GAPS)
     
     # Convert clusters to (start, end) tuples for the cropper
-    foi_ranges = [(min(g), max(g)) for g in final_foi_groups]
-    return foi_ranges
+    return [(min(g), max(g)) for g in final_foi_groups]

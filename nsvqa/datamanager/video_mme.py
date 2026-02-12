@@ -19,6 +19,14 @@ class VideoMME(Manager):
         self._categories = categories if isinstance(categories, list) else ([categories] if categories else [])
 
     def load_data(self):
+        def clean_circled_numbers(text):
+            # Mapping Unicode circled numbers to standard ASCII numbers
+            mapping = str.maketrans({
+                '①': '1', '②': '2', '③': '3', '④': '4', '⑤': '5',
+                '⑥': '6', '⑦': '7', '⑧': '8', '⑨': '9', '⑩': '10'
+            })
+            return text.translate(mapping)
+
         category_buckets = defaultdict(list)
         # Video-MME usually has a 'test.json'
         data_json = os.path.join(self._burned_path, "dataset.json")
@@ -58,6 +66,9 @@ class VideoMME(Manager):
                         "task_type": item["task_type"],
                     }
                 }
+                entry["question"] = clean_circled_numbers(entry["question"])
+                entry['candidates'] = [clean_circled_numbers(c) for c in entry['candidates']]
+                
                 category_buckets[duration_group].append(entry)
         return [entry for entries in category_buckets.values() for entry in entries]
 

@@ -3,6 +3,7 @@ import datetime
 import json
 import os
 from nsvqa.puls_multi_operators.prompts import *
+import logging
 
 class LLM:
     def __init__(self, model="gpt-4o", history=None, save_dir=""):
@@ -42,18 +43,14 @@ class LLM:
                 }
             
             self.history = [{"role": "system", "content": CANDIDATE_EXTRACTOR_SYSTEM}]
-            prop_query = f"Candidates: {candidates}"
-            candidates_res = self.prompt(prop_query)
-            candidates_data = json.loads(candidates_res)
-            propositions = candidates_data.get("proposition", [])
 
-            prop_query = f"Candidates: \"{candidates}\""
+            prop_query = f"Candidates: {candidates} | Question: {question}"
             candidates_res = self.prompt(prop_query)
             candidates_data = json.loads(candidates_res)
             candidates_props = candidates_data.get("proposition", [])
+            q_type = candidates_data.get('type', "SELECTION")
 
             if not candidates_props:
-
                 return {
                     "proposition": [],
                     "specification": "",
@@ -64,28 +61,38 @@ class LLM:
                         "log" : f"fail to extract propositions, candidates exists, failed to extract from candidates"
                     }
                 }
-            # Build Nested eventually: (F(A) AND (F(B) AND F(C)))
-            # This ensures all candidate entities are searched for in the video trace
-            nested_f = f'EVENTUALLY ("{propositions[-1]}")'
-            for p in reversed(propositions[:-1]):
-                nested_f = f'(EVENTUALLY ("{p}") AND {nested_f})'
-            
-            # Clean up names and return directly as Stage 2 is skipped for fallbacks
+            # # Build Nested eventually: (F(A) AND (F(B) AND F(C)))
+            # # This ensures all candidate entities are searched for in the video trace
+            # nested_f = f'EVENTUALLY ("{propositions[-1]}")'
+            # for p in reversed(propositions[:-1]):
+            #     nested_f = f'(EVENTUALLY ("{p}") AND {nested_f})'
+            if q_type == "SEQUENCE":
+                spec_parts = [f'EVENTUALLY ("{p}")' for p in candidates_props]
+                specification = " AND ".join(spec_parts)
+            elif q_type == "SELECTION":
+                spec_parts = [f'EVENTUALLY ("{p}")' for p in candidates_props]
+                # specification = " OR ".join(spec_parts)
+                specification = " OR ".join(spec_parts)
+            else:
+                logging.critical(f"Unidentified Question Type: {q_type}, defaulting to 'OR' Chaining Specification")
+                spec_parts = [f'EVENTUALLY ("{p}")' for p in candidates_props]
+                specification = " OR ".join(spec_parts)
             return {
-                "proposition": propositions,
-                "specification": nested_f,
+                "proposition": candidates_props,
+                "specification": specification,
                 "is_valid": True,
                 "message" : {
                         "question": question,
                         "candidates": candidates,
-                        "log" : f"fail to extract propositions, candidates successfully filled in, specification built"
+                        "log" : f"fail to extract propositions, candidates successfully filled in, specification built",
+                        "question_type": q_type
                     }
             }
 
         # --- STAGE 2: Specification Generation ---
         self.history.append({"role": "system", "content": TL_GENERATOR_SYSTEM})
         
-        spec_query = f"Question: \"{question}\" | Props: {propositions}"
+        spec_query = f"Question: \"{question}\" | Propositions: {propositions}"
         spec_res = self.prompt(spec_query)
         
         try:

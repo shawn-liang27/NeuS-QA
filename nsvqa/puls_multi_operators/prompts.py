@@ -8,11 +8,6 @@ You are an intelligent agent designed to extract atomic visual propositions from
 4. LISTS IN QUESTION: Extract the full text of events listed in the question.
 5. NO LABELS (CRITICAL): Never extract labels like "a", "b", "c", "1", "2". If a label refers to an action, you MUST extract the action text.
 
-***FORBIDDEN OUTPUT EXAMPLE***: 
-Input: "(a) Running (b) Jumping"
-Wrong Output: {"proposition": ["a", "b"]} <--- NEVER DO THIS.
-Correct Output: {"proposition": ["Running", "Jumping"]}
-
 ### EMPTY RETURN RULE: 
 Use ONLY when the question is purely structural and lacks any specific event descriptions (e.g., "Which is the correct order?"). In such cases, return: { "proposition": [] }.
 
@@ -36,35 +31,37 @@ Return ONLY a JSON object with the key "proposition".
 """
 
 CANDIDATE_EXTRACTOR_SYSTEM = """
-You are an intelligent agent designed to extract atomic propositions from multiple-choice options.
-Given a list of candidates, extract the unique objects, entities, or actions mentioned across all options.
+You are an intelligent agent designed to extract atomic visual propositions and identify the logical relationship between them from multiple-choice candidates.
 
 ### RULES:
-1. DESCRIPTIVE EXTRACTION: Extract the core visual actions or entities from the candidates.
-2. INDEX HANDLING: If candidates use numbers (e.g., "1, 4, 2, 3") to refer to a list in the question, look back at the original event list and extract those descriptions. Do not include list labels like 1., 2., 3., 4.
-3. ATOMICITY: Each proposition should be a single standalone event.
-4. Output ONLY JSON with the "proposition" key.
-
-### RULES:
-- Extract only concrete atomic propositions (e.g., "Dow Jones", "red robot", "scissors").
-- If candidates describe a sequence, extract each step as a separate proposition.
-
-- Output the result as a JSON object with a "proposition" key containing a list of strings.
+1. TYPE IDENTIFICATION (CRITICAL):
+    - Categorize as "SEQUENCE" if the candidates or the question imply a temporal order, a list of steps, or "what happened first/last".
+    - Categorize as "SELECTION" if the candidates are distinct, alternative choices where only one can be true.
+2. CONTEXT-AWARE CAPTIONING: 
+    - Do not extract candidates in isolation. Merge the candidate text with the main subject of the question to form a natural, descriptive phrase.
+    - Format: Use "A [subject] [attribute/location]" or "[Subject] performing [action]".
+    - Avoid colons, underscores, or "is a/is an" filler strings.
+3. DESCRIPTIVE EXTRACTION: Ensure the resulting proposition is a concrete visual description that could serve as an image caption.
+4. INDEX HANDLING: If candidates use numbers (e.g., "1, 2"), resolve them using the event list provided in the question.
+5. NO LABELS: Remove "A.", "(b)", "1.", etc.
+6. OUTPUT: Return ONLY a JSON object with keys "type" and "proposition".
 
 ### EXAMPLES:
-Candidates: ["Dow Jones, Nasdaq.", "Nasdaq, S&P 500.", "S&P 500, Dow Jones."] | Question: "Which of the following is the correct order for the three indices presented in the video?
--> { "proposition": ["Dow Jones", "Nasdaq", "S&P 500"] }
 
-### EXAMPLE:
-Question: "What is the order? 1. Sanding 2. Painting" | Candidates: ["1, 2", "2, 1"]
--> { "proposition": ["Sanding", "Painting"] }
+Question: "Where is the basketball court located?" | Candidates: ["In a school", "In a park", "In a gym"]
+-> { "type": "SELECTION", "proposition": ["A basketball court in a school", "A basketball court in a park", "A basketball court in a gym"] }
 
-Candidates: ["A. Grinding the beans, Pouring hot water, Waiting for the brew, Filling the mug." , "B. Pouring hot water, Grinding the beans, Filling the mug, Waiting for the brew.", "C. Filling the mug, Waiting for the brew, Pouring hot water, Grinding the beans.", "D, Grinding the beans, Filling the mug, Pouring hot water, Cleaning the kitchen."]
--> { "proposition": ["Grinding the beans", "Pouring hot water", "Waiting for the brew", "Filling the mug", "Cleaning the kitchen"] }
+Question: "What is the woman's appearance?" | Candidates: ["elderly woman", "young girl", "middle-aged woman"]
+-> { "type": "SELECTION", "proposition": ["An elderly woman", "A young girl", "A middle-aged woman"] }
+
+Question: "What is the order of events? 1. Washing hands 2. Cooking" | Candidates: ["1, 2", "2, 1"]
+-> { "type": "SEQUENCE", "proposition": ["A person washing hands", "A person cooking"] }
+
+Question: "Which activity is shown?" | Candidates: ["Surfing", "Fishing"]
+-> { "type": "SELECTION", "proposition": ["A person surfing", "A person fishing"] }
 
 ### OUTPUT:
-Return ONLY a JSON object with the key "proposition".
-
+Return ONLY a JSON object with "type" and "proposition" keys.
 """
 
 TL_GENERATOR_SYSTEM = """
@@ -95,3 +92,6 @@ Question: "In a dimly lit room, two robots stand silently. What happens when the
 ### OUTPUT:
 Return ONLY a JSON object with the key "specification".
 """
+
+# 6. SEQUENCE QUESTIONS: If the question asks for a sequence or "what happens in order," construct a FLAT linear chain where every proposition is prefixed by EVENTUALLY and joined by OR. 
+# -> { "specification": "EVENTUALLY adjusting seat AND EVENTUALLY walk with brakes AND EVENTUALLY start to pedal" }

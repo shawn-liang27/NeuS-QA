@@ -15,6 +15,7 @@ import os
 import datetime
 import argparse
 import logging
+from pathlib import Path
 
 import time
 from collections import defaultdict
@@ -59,7 +60,15 @@ def exec_nsvs(entry, sample_rate, device, model, clip_model, vlm, measure_metric
 
     video_data = read_video_adaptive(model=clip_model, video_path=entry["paths"]["video_path"], propositions=entry["puls"]["proposition"], threshold=0.22)
     
-    if measure_metrics: entry["time_metrics"]["video_IO_time"] = time.perf_counter() - io_start
+    if measure_metrics: 
+        entry["time_metrics"]["video_IO_time"] = time.perf_counter() - io_start
+        clip_metrics = video_data.get("clip_metrics", {})
+        for metric, value in clip_metrics.items():
+            entry["time_metrics"][metric] = value
+        entry["time_metrics"]["final_num_frames_sampled"] = video_data["final_num_frames_sampled"]
+        entry["time_metrics"]["video_sample_method"] = video_data["video_sample_method"]
+        entry["time_metrics"]["pct_final_num_from_uniform"] = video_data["pct_final_num_from_uniform"]
+    
 
     if "metadata" not in entry:
         entry["metadata"] = {}
@@ -101,6 +110,7 @@ def run_nsvqa(output_dir, llm_convo_dir, current_split, total_splits, vlm_config
     data = data_loader.load_data()
     print(f'Data Loading Complete! Data Length {len(data)}\nStarting NSVS Module')
     output = []
+    metrics_output = []
     starting = (len(data) * (current_split-1)) // total_splits
     ending = (len(data) * current_split) // total_splits
 
@@ -140,18 +150,27 @@ def run_nsvqa(output_dir, llm_convo_dir, current_split, total_splits, vlm_config
         # 5. Finalize Total Time
         if measure_metrics:
             metrics["completion_time"] = time.perf_counter() - t_start
-            for key, value in metrics.items():
-                entry.get("time_metrics", {})[key] = value
+            metrics["metadata"] = entry.get("metadata", {}).copy()
+            
+            print(f'Neus Complete with question {entry["metadata"]["id"]}')
+            print(f'Runtime metrics on {entry["metadata"]["id"]}:\n{entry["time_metrics"]}')
+
+            time_metrics = entry.pop("time_metrics", {})
+            metrics.update(time_metrics)
+            
+            metrics_output.append(metrics)
 
         output.append(entry)
-        print(f'Neus Complete with question {entry["metadata"]["id"]}')
-        print(f'Runtime metrics on {entry["metadata"]["id"]}:\n{entry["time_metrics"]}')
         
         vlm.clear_gpu_memory()
 
     with open(output_dir, "w") as f:
         json.dump(output, f, indent=4)
 
+    if measure_metrics:
+        metric_output_path = f'{str(Path(output_dir).parent.parent)}/full_time_metrics.json'
+        with open(metric_output_path, "w") as f:
+            json.dump(metrics_output, f, indent=4)
     
 
 def main(args): 

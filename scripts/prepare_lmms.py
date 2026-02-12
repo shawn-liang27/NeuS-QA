@@ -4,10 +4,12 @@ import shutil
 import argparse
 from pathlib import Path
 
+NO_ORIGINAL=True
+
 def main(args):
     longvideobench_path = "/usr/homes/sgl57/.data/LongVideoBench/lvb_val.json"
     nsvs_path = args.nsvs_path
-    logging_path = f'/usr/homes/sgl57/NeuS-VLM/NeuS-QA/experiment_results/lmm_eval/{args.task_type}/experiment_{args.experiment_number}'
+    logging_path = f'/usr/homes/sgl57/NeuS-VLM/NeuS-QA/experiment_results/lmm_eval/longvideobench/{args.task_type}/experiment_{args.experiment_number}'
     lmms_path = os.path.join(logging_path, "lmms")
     postprocess_path_list = steps = [os.path.join(nsvs_path, f'split_{i}', 'postprocess_output') for i in range(1, args.num_split + 1)]
     print(postprocess_path_list)
@@ -77,17 +79,17 @@ def main(args):
     with open(os.path.join(neusqa_output_path, "lvb_val.json"), "w") as f:
         json.dump(neusqa_output_data, f, indent=4)
 
-    
-    # original videos
-    burn_subtitles_path = "/usr/homes/sgl57/.data/LongVideoBench/burn-subtitles/T3E_E3E_T3O_O3O_mix_2026_01_14_21_55"
-    original_output_videos_path = os.path.join(original_output_path, "videos")
-    os.makedirs(original_output_videos_path, exist_ok=True)
+    if not NO_ORIGINAL:
+        # original videos
+        burn_subtitles_path = "/usr/homes/sgl57/.data/LongVideoBench/burn-subtitles/T3E_E3E_T3O_O3O_mix_2026_01_14_21_55"
+        original_output_videos_path = os.path.join(original_output_path, "videos")
+        os.makedirs(original_output_videos_path, exist_ok=True)
 
-    print(f"Burned Videos to move: {len(videos_to_move)}")
-    for video_path in videos_to_move:
-        burned_subtitles_video_file = os.path.join(burn_subtitles_path, video_path)
-        original_output_videos_file = os.path.join(original_output_videos_path, video_path)
-        shutil.copy(burned_subtitles_video_file, original_output_videos_file)
+        print(f"Burned Videos to move: {len(videos_to_move)}")
+        for video_path in videos_to_move:
+            burned_subtitles_video_file = os.path.join(burn_subtitles_path, video_path)
+            original_output_videos_file = os.path.join(original_output_videos_path, video_path)
+            shutil.copy(burned_subtitles_video_file, original_output_videos_file)
 
     # neusqa videos
 

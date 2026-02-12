@@ -26,6 +26,8 @@ def normalize_proposition(prop):
     
     # Now "S&P 500" becomes "s_and_p_500" 
     # and "S.P. 500" becomes "s_p_500"
+    if not prop or prop[0].isdigit():
+        prop = "n_" + prop
     return prop
 
 def process_specification(specification, propositions):
@@ -36,6 +38,14 @@ def process_specification(specification, propositions):
     #     prop_cleaned = prop_cleaned.replace("'", "").replace("-", "_").lower()
     #     prop_cleaned = re.sub(r'[^a-zA-Z0-9_]', '', prop_cleaned)
     #     new_propositions.append(prop_cleaned)
+    def is_balanced(s):
+        count = 0
+        for char in s:
+            if char == '(': count += 1
+            elif char == ')': count -= 1
+            if count < 0: return False
+        return count == 0
+
     new_propositions = [normalize_proposition(p) for p in propositions]
 
     replacements = sorted(
@@ -52,29 +62,11 @@ def process_specification(specification, propositions):
             # Replace the unquoted version and add quotes
             specification = specification.replace(original, f'"{new}"')
             
-    if "EVENTUALLY" in specification and " AND " in specification and " UNTIL " not in specification and " OR " not in specification:
-        # Strip all existing parentheses to rebuild from a clean slate
-        raw_spec = specification.replace("(", "").replace(")", "").strip()
-        
-        # Split into individual 'EVENTUALLY Prop' chunks
-        # This regex splits on ' AND ' but keeps the 'EVENTUALLY' prefix
-        parts = [p.strip() for p in raw_spec.split(" AND ")]
-        
-        if len(parts) >= 2:
-            # Build right-nested: (EVENTUALLY A AND (EVENTUALLY B AND (EVENTUALLY C)))
-            nested = parts[-1]
-            if not nested.startswith("EVENTUALLY"):
-                nested = f"EVENTUALLY ({nested})"
-            else:
-                # Ensure the proposition itself is wrapped
-                nested = nested.replace("EVENTUALLY ", "EVENTUALLY (") + ")"
-
-            for p in reversed(parts[:-1]):
-                # Wrap the proposition part of the current prefix
-                p_wrapped = p.replace("EVENTUALLY ", "EVENTUALLY (") + ")"
-                nested = f"({p_wrapped} AND {nested})"
-            
-            specification = nested
+    if " UNTIL " not in specification:
+        if not is_balanced(specification):
+            # Fallback: Strip and flatten for unary/binary safety
+            # We keep the logical words but remove the broken structure
+            specification = specification.replace("(", "").replace(")", "").strip()
     elif " UNTIL " in specification:
         # 2. Ambiguity Checker for UNTIL
         until_count = specification.count(" UNTIL ")

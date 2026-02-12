@@ -143,7 +143,7 @@ class InternVL:
             else:
                 clean_desc = desc.replace("_", " ")
                 prompt = (
-                    f"Does the video have the subtitle '{clean_desc}' present in the sequence of images?\n"
+                    f"Does the video have '{clean_desc}' present in the sequence of images?\n"
                     f"[PARSING RULE]: Answer ONLY 'Yes' or 'No'. Do not include punctuation or explanations. "
                     f"Example: Yes"
                 )

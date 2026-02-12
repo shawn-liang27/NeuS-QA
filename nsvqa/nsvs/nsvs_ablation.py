@@ -5,11 +5,12 @@ import tqdm
 import os
 import traceback
 
-from nsvqa.nsvs.model_checker.property_checker_multi import PropertyChecker
+from nsvqa.nsvs.model_checker.property_checker import PropertyChecker
 from nsvqa.nsvs.model_checker.video_automaton import VideoAutomaton
 from nsvqa.nsvs.video.frames_of_interest import FramesofInterest
-from nsvqa.utils.intersection import intersection_with_gaps, reconcile_sparse_ltl, group_with_gaps, resolve_target_window, reconcile_dynamic_ltl
+from nsvqa.utils.intersection import intersection_with_gaps, reconcile_sparse_ltl, group_with_gaps, resolve_target_window
 from nsvqa.nsvs.video.video_frame import VideoFrame
+from nsvqa.nsvs.vlm.vllm_client import VLLMClient
 
 import logging
 import time
@@ -17,8 +18,8 @@ import sys
 
 PRINT_ALL = False
 
-BRIDGE_MULT =  5 # seconds
-CONTEXT_SECONDS = 5 # Look for P/Q within 10 seconds of a handover
+BRIDGE_MULT =  10 # seconds
+CONTEXT_SECONDS = 10 # Look for P/Q within 10 seconds of a handover
 
 warnings.filterwarnings("ignore")
 
@@ -46,7 +47,7 @@ def group_into_continuous_events(frames_with_indices, gap_threshold=500):
     events.append(current_event) # Add the last one
     return events
 
-def run_nsvs(
+def run_nsvs_ablation(
     video_data: dict,
     video_path: str,
     proposition: list,
@@ -56,6 +57,7 @@ def run_nsvs(
     device: int,
     vlm: str,
     measure_metrics: bool,
+    config: dict,
     model_type: str = "dtmc",
     num_of_frame_in_sequence = 3,
     tl_satisfaction_threshold: float = 0.6,
@@ -79,8 +81,7 @@ def run_nsvs(
             }
           
     """
-
-    def process_frame(sequence_of_frames: list[np.ndarray], current_indices: int, measure_metrics: bool, proposition: list):
+    def process_frame_batching(sequence_of_frames: list[np.ndarray], current_indices: int, measure_metrics: bool, proposition: list):
         object_of_interest = {}    
 
         detected_objects = vlm.batch_detect(
@@ -97,6 +98,24 @@ def run_nsvs(
             object_of_interest=object_of_interest,
         )
         return frame
+
+    def process_frame_sequential(sequence_of_frames: list[np.ndarray], current_indices: int, measure_metrics: bool, proposition: list):
+        object_of_interest = {}    
+        for prop in proposition:
+            detected_object = vlm.detect(
+                seq_of_frames=sequence_of_frames,
+                scene_description=prop,
+                threshold=vlm_detection_threshold
+            )
+            object_of_interest[prop] = detected_object
+
+        frame = VideoFrame(
+            frame_idx_list=current_indices,
+            object_of_interest=object_of_interest,
+        )
+        return frame
+    
+    process_frame_method = process_frame_sequential if config.vlm_method == "sequential" else process_frame_batching
 
     if PRINT_ALL:
         print(f"Propositions: {proposition}\n")
@@ -151,7 +170,7 @@ def run_nsvs(
             # you might choose to skip it or pad it.
             if len(window) > 0:
                 frame_windows.append(window)
-
+    print(f'[DEBUG] Num frame_window: {len(frame_windows)} {len(frame_windows[0])}')
     if PRINT_ALL:
         looper = enumerate(frame_windows)
     else:
@@ -160,9 +179,8 @@ def run_nsvs(
     if measure_metrics:
         log_metrics("num_frame_windows", len(frame_windows))
 
-    num_stages = checker.get_num_stages() # Implement this in your checker to return len(stages)
-    all_detections = [set() for _ in range(num_stages)]
-
+    all_detections = [set(), set()]
+    
     for i, window in looper:
         if PRINT_ALL:
             print("\n" + "*"*50 + f" {i}/{len(frame_windows)-1} " + "*"*50)
@@ -176,7 +194,7 @@ def run_nsvs(
         per_window_detection_start = time.perf_counter() if measure_metrics else 0
 
         try:
-            frame = process_frame(current_frames, current_indices, measure_metrics, proposition)
+            frame = process_frame_method(current_frames, current_indices, measure_metrics, proposition)
         except Exception as e:
             print(f"[FATAL] Caught Exception: {e}\nExiting the Program...")
             traceback.print_exc()
@@ -191,19 +209,15 @@ def run_nsvs(
         #     os.makedirs(image_output_dir, exist_ok=True)
         #     frame.save_frame_img(save_path=os.path.join(image_output_dir, f"{i}"))
         if checker.validate_frame(frame_of_interest=frame):
-            print("[DEBUG] Frame is validated")
             thresh = frame.thresholded_detected_objects(threshold=detection_threshold)
             for prop in thresh.keys():
-                print(f"[DEBUG] {prop} passed the validation threshold")
-                stage_idx = checker.check_split(prop)
-                print(f"[DEBUG] {prop} added to stage {stage_idx}")
-                if stage_idx is not None:
-                    all_detections[stage_idx].update(frame.frame_idx_list)
+                split = checker.check_split(prop)
+                all_detections[split].update(frame.frame_idx_list)
             if PRINT_ALL:
                 print(f"\t{all_detections}")
 
             add_automaton_model_check_start = time.perf_counter() if measure_metrics else 0
-
+            print(f'[DEBUG] Frame {frame} added to automaton')
             automaton.add_frame(frame=frame)
             frame_of_interest.add_frame(frame)
 
@@ -221,44 +235,50 @@ def run_nsvs(
 
     automaton_foi = frame_of_interest.compile_foi()
 
-    if PRINT_ALL:
-        print(f"Automaton indices (Actual): {automaton_foi}")
+    if config.return_segments:
+        if PRINT_ALL:
+            print(f"Automaton indices (Actual): {automaton_foi}")
 
-    tw_before, tw_after = resolve_target_window(target_window)
-    foi = reconcile_dynamic_ltl(
-        video_info=video_data['video_info'],
-        all_detections=all_detections,
-        automaton_foi=automaton_foi,
-        target_window_before=tw_before,
-        target_window_after=tw_after,
-        BRIDGE_MULT=BRIDGE_MULT,
-        CONTEXT_SECONDS=CONTEXT_SECONDS,
-        TOLERANCE=8
-    )
+        foi = reconcile_sparse_ltl(
+            video_info=video_data['video_info'],
+            p_indices=all_detections[0], 
+            q_indices=all_detections[1],
+            automaton_foi=automaton_foi,
+            target_window=target_window,
+            BRIDGE_MULT=BRIDGE_MULT,
+            CONTEXT_SECONDS=CONTEXT_SECONDS,
+            TOLERANCE=8
+        )
 
-    if not foi or foi == [-1]:
-        MAX_GAPS_CLIP = 15 *  video_data['video_info']['fps']
-        
-        # Get either AI hits or CLIP indices
-        source_indices = sorted(list(set().union(*all_detections)))
-        if not source_indices:
-            raw_indices = video_data.get("original_indices", [])
-            source_indices = sorted([int(x) for x in raw_indices])
+        if not foi or foi == [-1]:
+            MAX_GAPS_CLIP = 3 * 60 * video_data['video_info']['fps']
+            
+            # Get either AI hits or CLIP indices
+            source_indices = sorted(list(set().union(*all_detections)))
+            if not source_indices:
+                raw_indices = video_data.get("original_indices", [])
+                source_indices = sorted([int(x) for x in raw_indices])
 
-        if source_indices:
-            # group_with_gaps returns lists of frames; we convert to (min, max)
-            groups = group_with_gaps(source_indices, max_gaps=MAX_GAPS_CLIP)
-            foi = [(min(g), max(g)) for g in groups]
-        else:
-            foi = [-1]
+            if source_indices:
+                # group_with_gaps returns lists of frames; we convert to (min, max)
+                groups = group_with_gaps(source_indices, max_gaps=MAX_GAPS_CLIP)
+                foi = [(min(g), max(g)) for g in groups]
+            else:
+                foi = [-1]
 
-    if foi != [-1]:
+        if foi == [-1]:
+            if measure_metrics:
+                log_metrics("num_model_checks", _model_check_count)
+                log_metrics("num_vlm_detections", _vlm_detection_count)
+                return foi, all_detections, [-1], time_metrics
+            return foi, all_detections, [-1], None
+
+        final_ranges = []
         fps = video_data['video_info']['fps']
         frame_count = video_data['video_info']["frame_count"]
         MAX_GAPS = BRIDGE_MULT * fps
         tw_before, tw_after = resolve_target_window(target_window)
-        final_ranges = []
-        
+
         for foi_group in foi:
             group_min, group_max = min(foi_group), max(foi_group)
             
@@ -267,9 +287,9 @@ def run_nsvs(
             end_ext = min(frame_count - 1, int(group_max + tw_after * fps))
             
             # Instead of update(range(...)), we just store the boundary
-            final_ranges.append((start_ext, end_ext))
-            
+            final_ranges.append((start_ext, end_ext)) 
         final_ranges.sort()
+
         merged = []
         if final_ranges:
             curr_start, curr_end = final_ranges[0]
@@ -282,19 +302,81 @@ def run_nsvs(
                     curr_start, curr_end = next_start, next_end
             merged.append((curr_start, curr_end))
 
-    if True:
-        print("\n" + "-"*107)
-        print(f"Automaton_foi {automaton_foi}")
-        print(f"All Detections: {all_detections}")
-        print("Detected frames of interest:")
-        print(foi)
+        if True:
+            logging.info("\n" + "-"*107)
+            logging.info(f"Automaton_foi {automaton_foi}")
+            logging.info(f"All Detections: {all_detections}")
+            logging.info(f"Detected frames of interest: {foi}")
+            logging.info(f"Merged Frames of Interests: {merged}")
 
-    logging.info(f"Merged Frames of Interests: {merged}")
+        if measure_metrics:
+            log_metrics("num_model_checks", _model_check_count)
+            log_metrics("num_vlm_detections", _vlm_detection_count)
+            return foi, all_detections, merged, time_metrics
+        return foi, all_detections, merged, None
+    
+    else:
+        if PRINT_ALL:
+            print(f"Automaton indices: {automaton_foi}")
 
-    if measure_metrics:
-        log_metrics("num_model_checks", _model_check_count)
-        log_metrics("num_vlm_detections", _vlm_detection_count)
-        return foi, all_detections, merged, time_metrics
+        # if not automaton_foi or not any(len(x) > 0 for x in all_detections):
+        if not automaton_foi: # automaton empty or nothing detected
+            foi = [-1]
+        else:
+            detections_foi = [intersection_with_gaps(all_detections)]
+            detections_foi = list(range(int(min(detections_foi)), int(max(detections_foi)) + 1))
+            if PRINT_ALL:
+                print(f"Detection indices: {detections_foi}")
 
-    return foi, all_detections, merged, None
+            foi = list(set(automaton_foi) & set(detections_foi)) # set intersection
+            if len(foi) == 0:
+                foi = [-1]
+            else:
+                foi = [min(foi), max(foi)]
+        if foi != [-1]:
+            fps = video_data['video_info']['fps']
+            frame_count = video_data['video_info']["frame_count"]
+            MAX_GAPS = BRIDGE_MULT * fps
+            tw_before, tw_after = resolve_target_window(target_window)
+            final_ranges = []
+            
+            for foi_group in foi:
+                group_min, group_max = min(foi_group), max(foi_group)
+                
+                # Calculate boundaries with padding
+                start_ext = max(0, int(group_min + tw_before * fps))
+                end_ext = min(frame_count - 1, int(group_max + tw_after * fps))
+                
+                # Instead of update(range(...)), we just store the boundary
+                final_ranges.append((start_ext, end_ext))
+                
+            final_ranges.sort()
+            merged = []
+            if final_ranges:
+                curr_start, curr_end = final_ranges[0]
+                for next_start, next_end in final_ranges[1:]:
+                    # If the next range starts before the current one ends (plus MAX_GAPS)
+                    if next_start <= curr_end + MAX_GAPS:
+                        curr_end = max(curr_end, next_end)
+                    else:
+                        merged.append((curr_start, curr_end))
+                        curr_start, curr_end = next_start, next_end
+                merged.append((curr_start, curr_end))
+
+        if True:
+            print("\n" + "-"*107)
+            print(f"Automaton_foi {automaton_foi}")
+            print(f"All Detections: {all_detections}")
+            print("Detected frames of interest:")
+            print(foi)
+
+        logging.info(f"Merged Frames of Interests: {merged}")
+
+        if measure_metrics:
+            log_metrics("num_model_checks", _model_check_count)
+            log_metrics("num_vlm_detections", _vlm_detection_count)
+            return foi, all_detections, merged, time_metrics
+        
+        vlm.clear_gpu_memory()
+        return foi, all_detections, merged, None
 

@@ -2,9 +2,10 @@
 #!/bin/bash
 set -euo pipefail
 
-TOTAL_SPLITS=5  # Set this to your number of GPUs
+TOTAL_SPLITS=70  # Set this to your number of GPUs
 CURRENT_SPLIT=$1
 GPU=$2
+BENCHMARK=mlvu
 
 JOB_DIR="$HOME/NeuS-VLM/NeuS-QA"
 JOB_ID=$(date +%Y%m%d_%H%M%S)
@@ -13,13 +14,13 @@ export HF_HOME="$HOME/.cache/huggingface"
 
 # Variables
 # DATA_DIR="/usr/homes/sgl57/.data/LongVideoBench"
-DATA_DIR="/usr/homes/sgl57/.data/Video-MME"
-BURNED_DIR="/usr/homes/sgl57/.data/Video-MME/burn-subtitles"
+DATA_DIR="/usr/homes/sgl57/.data/mlvu/MLVU"
+BURNED_DIR="/usr/homes/sgl57/.data/mlvu/MLVU"
 MODEL="InternVL2-8B"
 
-CATEGORIES=("Temporal Perception" "Spatial Perception" "Attribute Perception" "Action Recognition" "Object Recognition" "OCR Problems" "Temporal Reasoning" "Spatial Reasoning" "Object Reasoning" "Information Synopsis")
+CATEGORIES=("2_needle" "3_ego")
 CAT_STR=$(IFS='_'; echo "${CATEGORIES[*]}")
-OUT_DIR="$JOB_DIR/experiment_results/nsvs_improved/video_mme_trial/video_mme_split${CURRENT_SPLIT}_${JOB_ID}"
+OUT_DIR="$JOB_DIR/experiment_results/nsvs_improved/mlvu/mlvu_split${CURRENT_SPLIT}_${JOB_ID}"
 
 mkdir -p "$OUT_DIR"
 
@@ -57,6 +58,7 @@ launch_worker() {
         --current_split "${SPLIT_ID}" \
         --total_splits "${TOTAL_SPLITS}" \
         --categories "${CATEGORIES[@]}" \
+        --benchmark "${BENCHMARK}" \
         --measure_metrics > "${WORKER_LOG}_eval.out" 2>&1
 
     local PY_EXIT=$?

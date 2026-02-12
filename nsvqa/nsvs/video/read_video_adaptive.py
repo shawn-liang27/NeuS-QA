@@ -25,7 +25,7 @@ def read_video_adaptive(model, video_path, propositions,
     expected_uniform_count = int(duration_total * sample_rate)
     
     if expected_uniform_count <= uniform_sample_size_limit:
-        logging.info(f"[DEBUG] Video {video_path} is within budget ({expected_uniform_count} frames). Using Uniform Sampling.")
+        logging.info(f"[DEBUG] Video {video_path} is within limit ({expected_uniform_count} frames). Using Uniform Sampling.")
         # Uniform sampling logic
         step = int(max(1, fps / sample_rate))
         indices = list(range(0, frame_count - 1, step))
@@ -33,14 +33,17 @@ def read_video_adaptive(model, video_path, propositions,
         return {
             "images": [f for f in frames],
             "original_indices": indices,
-            "video_info": {"fps": fps, "frame_count": frame_count, "sample_rate": sample_rate}
+            "video_info": {"fps": fps, "frame_count": frame_count, "sample_rate": sample_rate},
+            "final_num_frames_sampled" : len(indices),
+            "video_sample_method" : "uniform",
+            "pct_final_num_from_uniform": round(len(indices) / expected_uniform_count, 4)
         }
 
     # --- TIER 2: CLIP RELEVANCE PIPELINE (For Long Videos) ---
     logging.info(f"[DEBUG] Video {video_path} exceeds budget. Initiating CLIP filtering.")
 
     # --- 1. COARSE SCAN (0.5 FPS) ---
-    CLIP_SCAN_HZ = 0.5
+    CLIP_SCAN_HZ = sample_rate
     scan_step = int(max(1, fps / CLIP_SCAN_HZ))
     coarse_indices = list(range(0, frame_count - 1, scan_step))
     coarse_frames = vr.get_batch(coarse_indices).asnumpy()
@@ -48,6 +51,8 @@ def read_video_adaptive(model, video_path, propositions,
     cleaned_props = []
     for p in propositions:
         clean = p.replace("subtitle_", "").replace("_", " ")
+        if clean.startswith("n_"):
+            clean = clean[2:]
         cleaned_props.append(clean)
 
     print(f"[DEBUG] Video {video_path} FPS {fps} Length {frame_count} Scanning {len(coarse_indices)} frames for {len(cleaned_props)} Proposition...\nSampled Frame: {coarse_indices}")
@@ -77,17 +82,21 @@ def read_video_adaptive(model, video_path, propositions,
     if not top_anchors:
         logging.info("[WARNING] CLIP Relevant Search Speedup Failed, Switching Back to Uniform Sampling")
         uniform_sample_count = int(duration_total * sample_rate)
-
+        sample_method = "uniform"
         if uniform_sample_count > uniform_sample_size_limit:
             logging.info(f"[WARNING] Video {video_path} not is within budget ({uniform_sample_count} frames). Using Uniform Samplin Limit: {uniform_sample_size_limit}.")
             uniform_sample_count = uniform_sample_size_limit
+            sample_method = f"uniform_limit_{uniform_sample_size_limit}"
 
         indices = np.linspace(0, frame_count - 1, num=uniform_sample_size_limit, dtype=int).tolist()   
         frames = vr.get_batch(indices).asnumpy()
         return {
             "images": frames,
             "original_indices": indices,
-            "video_info": {"fps": fps, "frame_count": frame_count, "sample_rate" : sample_rate}
+            "video_info": {"fps": fps, "frame_count": frame_count, "sample_rate" : sample_rate},
+            "final_num_frames_sampled" : len(indices),
+            "video_sample_method" : sample_method,
+            "pct_final_num_from_uniform": round(len(indices) / expected_uniform_count, 4)
         }
 
     # Convert anchors to time-windows (1s padding each side)
@@ -161,9 +170,30 @@ def read_video_adaptive(model, video_path, propositions,
 
     logging.info(f"Deduplication complete. Final count: {len(deduplicated_indices)} (from {len(raw_final_indices)})")
 
+    if True:
+        intial_num_sampled = len(coarse_indices)
+        stage1_num_sampled_after_merge = len(raw_final_indices)
+        pct_stage1_from_full = round(stage1_num_sampled_after_merge / expected_uniform_count, 4)
+        stage2_num_sampled = len(deduplicated_indices)
+        pct_stage2_from_full = round(stage2_num_sampled / expected_uniform_count, 4)
+        pct_stage2_from_stage1 = round(stage2_num_sampled / stage1_num_sampled_after_merge, 4)
+        clip_metrics = {
+            "expected_uniform_count" : expected_uniform_count,
+            "initial_num_frames_sampled" : intial_num_sampled,
+            "stage1_num_frames_retained" : stage1_num_sampled_after_merge,
+            "pct_stage1_from_uniform" : pct_stage1_from_full,
+            "stage2_num_frames_retained" : stage2_num_sampled,
+            "pct_stage2_from_stage1" : pct_stage2_from_stage1,
+            "pct_stage2_from_uniform" : pct_stage2_from_full,
+        }
+
     final_frames = vr.get_batch(deduplicated_indices).asnumpy()
     return {
         "images": [f for f in final_frames],
         "original_indices": deduplicated_indices,
-        "video_info": {"fps": fps, "frame_count": frame_count, "sample_rate": sample_rate}
+        "video_info": {"fps": fps, "frame_count": frame_count, "sample_rate": sample_rate},
+        "video_sample_method": "two-stage clip",
+        "clip_metrics" : clip_metrics,
+        "final_num_frames_sampled" : len(deduplicated_indices),
+        "pct_final_num_from_uniform": round(len(deduplicated_indices) / expected_uniform_count, 4)
     }
