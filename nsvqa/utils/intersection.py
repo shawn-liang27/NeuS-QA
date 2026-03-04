@@ -14,42 +14,67 @@ def resolve_target_window(target_window):
             result.append(0)
     return result
 
-def group_with_gaps(nums, max_gaps=2):
+# def group_with_gaps(nums, max_gaps=2):
+#     if not nums:
+#         return []
+
+#     groups = []
+#     current_group = [nums[0]]
+
+#     for i in range(1, len(nums)):
+#         diff = nums[i] - nums[i-1]
+        
+#         if diff <= max_gaps + 1:
+#             if diff > 1:
+#                 current_group.extend(range(nums[i-1] + 1, nums[i] + 1))
+#             else:
+#                 current_group.append(nums[i])
+#         else:
+#             groups.append(current_group)
+#             current_group = [nums[i]]
+
+#     groups.append(current_group)
+#     return groups
+
+def group_with_gaps(nums, max_gaps):
     if not nums:
         return []
 
+    # Sort to ensure we are checking temporal neighbors
+    nums = sorted(list(nums))
+    
     groups = []
     current_group = [nums[0]]
 
     for i in range(1, len(nums)):
+        # Calculate the jump between this detection and the previous one
         diff = nums[i] - nums[i-1]
         
-        if diff <= max_gaps + 1:
-            if diff > 1:
-                current_group.extend(range(nums[i-1] + 1, nums[i] + 1))
-            else:
-                current_group.append(nums[i])
+        # If the jump is smaller than our allowed gap, they belong to the same event
+        if diff <= max_gaps:
+            current_group.append(nums[i])
         else:
+            # Otherwise, finish this group and start a new one
             groups.append(current_group)
             current_group = [nums[i]]
 
     groups.append(current_group)
     return groups
 
-def intersection_with_gaps(indices, max_gaps=8): # smart set intersection
-    if len(non_empty := [s for s in indices if s]) == 1:
-        return list(non_empty[0])
+def intersection_with_gaps(indices, max_gaps=8):
+    non_empty = [s for s in indices if s]
+    if len(non_empty) == 1:
+        return sorted(list(non_empty[0]))
 
-    A = set(indices[0])
-    B = set(indices[1])
-    combined = sorted(list(A | B))
+    combined = sorted(list(set().union(*indices)))
+    
+    if not combined:
+        return []
 
-    largest_set = []
-    for group in group_with_gaps(combined, max_gaps):
-        if len(group) > len(largest_set):
-            largest_set = group
+    groups = group_with_gaps(combined, max_gaps)
+    largest_set = max(groups, key=lambda g: (max(g) - min(g)))
 
-    return largest_set
+    return sorted(largest_set)
 
 
 def find_soft_handover(p_indices, q_indices, tolerance_frames):
@@ -80,7 +105,7 @@ def find_soft_handover(p_indices, q_indices, tolerance_frames):
             
     return handover_points
 
-def reconcile_sparse_ltl(video_info, p_indices, q_indices, automaton_foi, target_window, BRIDGE_MULT=30, CONTEXT_SECONDS=10, TOLERANCE=8):
+def reconcile_sparse_ltl(video_info, p_indices, q_indices, automaton_foi, target_window, BRIDGE_MULT=3, CONTEXT_SECONDS=5, TOLERANCE=5):
 
     fps = video_info["fps"]
     sample_rate = video_info.get("sample_rate", 1)
@@ -88,7 +113,7 @@ def reconcile_sparse_ltl(video_info, p_indices, q_indices, automaton_foi, target
     
     MAX_GAPS = BRIDGE_MULT * fps
     WINDOW = CONTEXT_SECONDS * fps      # 300
-    tolerance = 8 * fps
+    tolerance = TOLERANCE * fps
 
     if q_indices:
         handover_all = find_soft_handover(p_indices, q_indices, tolerance)
@@ -121,7 +146,7 @@ def reconcile_sparse_ltl(video_info, p_indices, q_indices, automaton_foi, target
     return final_foi_groups
 
 def reconcile_dynamic_ltl(video_info, all_detections, automaton_foi, target_window_before, target_window_after,
-                          BRIDGE_MULT=5, CONTEXT_SECONDS=5, TOLERANCE=8):
+                          BRIDGE_MULT=5, CONTEXT_SECONDS=5, TOLERANCE=5):
     """
     Handles N-stage sequential handovers (0->1, 1->2, ... N-1->N)
     to identify Frames of Interest (FOI) across a complex LTL chain.

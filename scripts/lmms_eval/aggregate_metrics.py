@@ -52,8 +52,10 @@ def get_dataframe(raw_results, benchmark_name, out_dir):
     assert benchmark_name in BENCHMARK_NAME, f"'{benchmark_name}' is not a known benchmark"
     metadata_list = BENCHMARK_NAME[benchmark_name]
     metric_list = []
+
     for result in raw_results:
         metrics = result["time_metrics"]
+        metrics["frames_of_interest"] = result["frames_of_interest"]
         for metadata in metadata_list:
             metrics[metadata] = result["metadata"][metadata]
         metric_list.append(metrics)
@@ -118,7 +120,7 @@ def aggregate_metrics(raw_results, is_naive):
 
         if not total_foi:
             total_foi = 1
-        pct_foi_out_of_full = round(frame_count / total_foi, 3)
+        pct_foi_out_of_full = round(total_foi / frame_count, 5)
 
         entry["time_metrics"]["foi_count"] = total_foi
         entry["time_metrics"]["pct_foi_out_of_full"] = pct_foi_out_of_full
@@ -142,7 +144,7 @@ def aggregate_metrics(raw_results, is_naive):
             category_accumulators[cat][key] += total_time
             global_accumulator[key] += total_time
 
-    # 3. Final Aggregation
+    # 5. Final Aggregation
     category_aggregated = {}
     for cat, totals in category_accumulators.items():
         count = category_counts[cat]
@@ -152,19 +154,19 @@ def aggregate_metrics(raw_results, is_naive):
         }
 
         category_aggregated[cat][f'avg_foi_count'] = int(category_aggregated[cat][f'avg_foi_count'])
-        category_aggregated[cat][f'avg_pct_foi_out_of_full'] = round(category_aggregated[cat][f'avg_pct_foi_out_of_full'], 3)
-        category_aggregated[cat][f'avg_PULS_runtime_pct'] = round(category_aggregated[cat][f'avg_PULS_time'] / category_aggregated[cat][f'avg_completion_time'], 3)
-        category_aggregated[cat][f'avg_target_id_runtime_pct'] = round(category_aggregated[cat][f'avg_Target_ID_time'] / category_aggregated[cat][f'avg_completion_time'], 3)
-        category_aggregated[cat][f'avg_neus_runtime_pct'] = round(category_aggregated[cat][f'avg_NeuS_time'] / category_aggregated[cat][f'avg_completion_time'], 3)
+        category_aggregated[cat][f'avg_pct_foi_out_of_full'] = round(category_aggregated[cat][f'avg_pct_foi_out_of_full'], 5)
+        category_aggregated[cat][f'avg_PULS_runtime_pct'] = round(category_aggregated[cat][f'avg_PULS_time'] / category_aggregated[cat][f'avg_completion_time'], 5)
+        category_aggregated[cat][f'avg_target_id_runtime_pct'] = round(category_aggregated[cat][f'avg_Target_ID_time'] / category_aggregated[cat][f'avg_completion_time'], 5)
+        category_aggregated[cat][f'avg_neus_runtime_pct'] = round(category_aggregated[cat][f'avg_NeuS_time'] / category_aggregated[cat][f'avg_completion_time'], 5)
 
-        category_aggregated[cat][f'avg_cropping_video_time'] = round(category_aggregated[cat][f'avg_cropping_video_time'] / category_aggregated[cat][f'avg_completion_time'], 3)
+        category_aggregated[cat][f'avg_cropping_video_time'] = round(category_aggregated[cat][f'avg_cropping_video_time'] / category_aggregated[cat][f'avg_completion_time'], 5)
         
-        category_aggregated[cat][f'avg_model_checks_time_pct_out_neus'] = round(category_aggregated[cat][f'avg_model_checks_time'] / category_aggregated[cat][f'avg_NeuS_time'], 3)
-        category_aggregated[cat][f'avg_model_checks_time_pct_out_neus'] = round(category_aggregated[cat][f'avg_per_frame_window_detection_time'] * category_aggregated[cat][f'avg_num_frame_windows'] / category_aggregated[cat][f'avg_NeuS_time'], 3)
-        category_aggregated[cat][f'avg_model_checks_time_pct_out_neus'] = round(category_aggregated[cat][f'avg_cropping_video_time'] / category_aggregated[cat][f'avg_NeuS_time'], 3)
+        category_aggregated[cat][f'avg_model_checks_time_pct_out_neus'] = round(category_aggregated[cat][f'avg_model_checks_time'] / category_aggregated[cat][f'avg_NeuS_time'], 5)
+        category_aggregated[cat][f'avg_model_checks_time_pct_out_neus'] = round(category_aggregated[cat][f'avg_per_frame_window_detection_time'] * category_aggregated[cat][f'avg_num_frame_windows'] / category_aggregated[cat][f'avg_NeuS_time'], 5)
+        category_aggregated[cat][f'avg_model_checks_time_pct_out_neus'] = round(category_aggregated[cat][f'avg_cropping_video_time'] / category_aggregated[cat][f'avg_NeuS_time'], 5)
 
 
-        category_aggregated[cat][f'avg_pct_foi_out_of_full'] = round(category_aggregated[cat][f'avg_pct_foi_out_of_full'], 3)
+        category_aggregated[cat][f'avg_pct_foi_out_of_full'] = round(category_aggregated[cat][f'avg_pct_foi_out_of_full'], 5)
 
 
     global_aggregated = {
@@ -173,18 +175,18 @@ def aggregate_metrics(raw_results, is_naive):
     }
     print(global_aggregated)
     global_aggregated[f'global_avg_foi_count'] = int(global_aggregated[f'global_avg_foi_count'])
-    global_aggregated[f'global_avg_pct_foi_out_of_full'] = round(global_aggregated[f'global_avg_pct_foi_out_of_full'], 3)
-    global_aggregated[f'global_avg_PULS_runtime_pct'] = round(global_aggregated[f'global_avg_PULS_time'] / global_aggregated[f'global_avg_completion_time'], 3)
-    global_aggregated[f'global_avg_target_id_runtime_pct'] = round(global_aggregated[f'global_avg_Target_ID_time'] / global_aggregated[f'global_avg_completion_time'], 3)
-    global_aggregated[f'global_avg_neus_runtime_pct'] = round(global_aggregated[f'global_avg_NeuS_time'] / global_aggregated[f'global_avg_completion_time'], 3)
+    global_aggregated[f'global_avg_pct_foi_out_of_full'] = round(global_aggregated[f'global_avg_pct_foi_out_of_full'], 5)
+    global_aggregated[f'global_avg_PULS_runtime_pct'] = round(global_aggregated[f'global_avg_PULS_time'] / global_aggregated[f'global_avg_completion_time'], 5)
+    global_aggregated[f'global_avg_target_id_runtime_pct'] = round(global_aggregated[f'global_avg_Target_ID_time'] / global_aggregated[f'global_avg_completion_time'], 5)
+    global_aggregated[f'global_avg_neus_runtime_pct'] = round(global_aggregated[f'global_avg_NeuS_time'] / global_aggregated[f'global_avg_completion_time'], 5)
 
-    global_aggregated[f'global_avg_cropping_video_time'] = round(global_aggregated[f'global_avg_cropping_video_time'] / global_aggregated[f'global_avg_completion_time'], 3)
+    global_aggregated[f'global_avg_cropping_video_time'] = round(global_aggregated[f'global_avg_cropping_video_time'] / global_aggregated[f'global_avg_completion_time'], 5)
     
-    global_aggregated[f'global_avg_model_checks_time_pct_out_neus'] = round(global_aggregated[f'global_avg_model_checks_time'] / global_aggregated[f'global_avg_NeuS_time'], 3)
-    global_aggregated[f'global_avg_model_checks_time_pct_out_neus'] = round(global_aggregated[f'global_avg_per_frame_window_detection_time'] * global_aggregated[f'global_avg_num_frame_windows'] / global_aggregated[f'global_avg_NeuS_time'], 3)
-    global_aggregated[f'global_avg_model_checks_time_pct_out_neus'] = round(global_aggregated[f'global_avg_cropping_video_time'] / global_aggregated[f'global_avg_NeuS_time'], 3)
+    global_aggregated[f'global_avg_model_checks_time_pct_out_neus'] = round(global_aggregated[f'global_avg_model_checks_time'] / global_aggregated[f'global_avg_NeuS_time'], 5)
+    global_aggregated[f'global_avg_model_checks_time_pct_out_neus'] = round(global_aggregated[f'global_avg_per_frame_window_detection_time'] * global_aggregated[f'global_avg_num_frame_windows'] / global_aggregated[f'global_avg_NeuS_time'], 5)
+    global_aggregated[f'global_avg_model_checks_time_pct_out_neus'] = round(global_aggregated[f'global_avg_cropping_video_time'] / global_aggregated[f'global_avg_NeuS_time'], 5)
     
-    global_aggregated[f'global_avg_pct_foi_out_of_full'] = round(global_aggregated[f'global_avg_pct_foi_out_of_full'], 3)
+    global_aggregated[f'global_avg_pct_foi_out_of_full'] = round(global_aggregated[f'global_avg_pct_foi_out_of_full'], 5)
 
     return {"Categorical Metrics" : category_aggregated, "Global Metrics" :global_aggregated}
 
@@ -194,25 +196,33 @@ def main():
     parser.add_argument("nsvs_result_dir")
     parser.add_argument("benchmark_name", type=str, default="lvb")
     parser.add_argument("--naive", action="store_true")
+    parser.add_argument("--new_loc", action="store_true")
     args = parser.parse_args()
     nsvs_result_dir = args.nsvs_result_dir
     out_file = f'{nsvs_result_dir}/run_time_metrics.json'
 
     raw_res = []
     p = Path(nsvs_result_dir)
-    found_files = p.rglob(f'**/postprocess_output_*.json')
-    for file_path in found_files:
-        with open(file_path, "r") as file:
-            out = json.load(file)
-            raw_res.extend(out)
+    if args.new_loc:
+        found_files = p.rglob(f'**/full_time_metrics.json')
+        for file_path in found_files:
+            with open(file_path, "r") as file:
+                out = json.load(file)
+                raw_res.extend(out)
+    else:
+        found_files = p.rglob(f'**/postprocess_output_*.json')
+        for file_path in found_files:
+            with open(file_path, "r") as file:
+                out = json.load(file)
+                raw_res.extend(out)
     
     metrics = aggregate_metrics(raw_res, args.naive)
-    get_dataframe(raw_res, args.benchmark_name, nsvs_result_dir)
+    
     print(metrics)
 
     with open(out_file, "w") as f:
         json.dump(metrics, f, indent=4)
-    
+    get_dataframe(raw_res, args.benchmark_name, nsvs_result_dir)
     print(f'Aggregated Result saved at {out_file}')
 if __name__ == "__main__":
     main()

@@ -10,7 +10,6 @@ export DECORD_EOF_RETRY_MAX=40960
 TOTAL_SPLITS=4
 GPU_START=$1
 RUN_NUMBER=$2
-ABLATION_TYPE=$3 # stage1 stage2 batched segments, adaptive, adaptive_gt
 BENCHMARK=lvb
 export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 
@@ -24,9 +23,7 @@ MAX_TOKEN_LEN=65000
 CATEGORIES=("T3E" "E3E" "T3O" "O3O") # "T3E", "E3E", "T3O", "O3O"
 CAT_STR=$(IFS='_'; echo "${CATEGORIES[*]}")
 
-
-OUT_DIR="$JOB_DIR/experiment_results/nsvs_improved/ablation/ablation_${ABLATION_TYPE}_${RUN_NUMBER}"
-CONFIG_FILE="/usr/homes/sgl57/NeuS-VLM/NeuS-QA/experiment_results/nsvs_improved/ablation/config_${ABLATION_TYPE}.json"
+OUT_DIR="$JOB_DIR/experiment_results/nsvs_improved/"${MODEL//\//_}"/rt-neus/experiment_${RUN_NUMBER}"
 
 mkdir -p "$OUT_DIR"
 
@@ -55,7 +52,7 @@ launch_worker() {
     echo ">>> [Worker $SPLIT_ID] Ready. Running Python script..."
     local START_TIME=$(date +%s)
 
-    python -u scripts/lmms_eval/nsvs_only_ablation.py \
+    python -u scripts/lmms_eval/nsvs_only_mutil_operators.py \
         --vlm_model_name "${MODEL}" \
         --port_number "${GPU_ID}" \
         --data_dir "${DATA_DIR}" \
@@ -64,8 +61,6 @@ launch_worker() {
         --current_split "${SPLIT_ID}" \
         --total_splits "${TOTAL_SPLITS}" \
         --categories "${CATEGORIES[@]}" \
-        --config "${CONFIG_FILE}" \
-        --save_crop \
         --measure_metrics \
         --benchmark "${BENCHMARK}" \
         >"${WORKER_LOG}_eval.out" 2>&1

@@ -10,7 +10,6 @@ export DECORD_EOF_RETRY_MAX=40960
 # Variables
 TOTAL_SPLITS=8  # Set this to your number of GPUs
 GPU_START=$1
-LABEL="Elaborative Propositions"
 BENCHMARK=mlvu
 export CUDA_VISIBLE_DEVICE=0,1,2,3,4,5,6,7
 DATA_DIR="/usr/homes/sgl57/.data/mlvu/MLVU"

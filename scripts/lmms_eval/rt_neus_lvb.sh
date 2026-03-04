@@ -7,7 +7,7 @@ JOB_ID=$(date +%Y%m%d_%H%M%S)
 export HF_HOME="$HOME/.cache/huggingface"
 export DECORD_EOF_RETRY_MAX=40960
 
-TOTAL_SPLITS=8
+TOTAL_SPLITS=4
 GPU_START=$1
 RUN_NUMBER=$2
 export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7

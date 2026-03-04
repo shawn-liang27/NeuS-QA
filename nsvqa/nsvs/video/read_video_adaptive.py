@@ -6,11 +6,22 @@ from sentence_transformers import util
 from PIL import Image
 import logging
 
+def get_dynamic_sample_rate(duration):
+    if duration <= 10:
+        return 2.5      # 2-3 fps
+    elif duration <= 60:
+        return 2     # 1-1.5 fps
+    elif duration <= 500:    # 1 to 5 mins
+        return 1.5      # 1 fps
+    elif duration <= 1800:   # 5 to 30 mins
+        return 1      
+    else:               # Extremely long (30+ mins)
+        return 0.75      # 1 frame per 2 seconds
 
 def read_video_adaptive(model, video_path, propositions, 
-                               threshold=0.23, tau_r=0.95, sample_rate=1, top_k=200, 
-                               merge_threshold_sec=3.0, window_padding=1.0, 
-                               max_frames_per_segment=50, uniform_sample_size_limit=240):
+                               threshold=0.21, tau_r=0.90, sample_rate=1, top_k=200, 
+                               merge_threshold_sec=2.0, window_padding=1.0, 
+                               max_frames_per_segment=40, uniform_sample_size_limit=180):
     """
     Refined Pipeline:
     1. Coarse CLIP Scan.
@@ -22,49 +33,91 @@ def read_video_adaptive(model, video_path, propositions,
     fps, frame_count = vr.get_avg_fps(), len(vr)
     duration_total = frame_count / fps
 
-    expected_uniform_count = int(duration_total * sample_rate)
+    SCAN_HZ = get_dynamic_sample_rate(duration_total)
+    # SCAN_HZ = sample_rate
+    expected_uniform_count = int(duration_total * SCAN_HZ)
     
-    if expected_uniform_count <= uniform_sample_size_limit:
-        logging.info(f"[DEBUG] Video {video_path} is within limit ({expected_uniform_count} frames). Using Uniform Sampling.")
-        # Uniform sampling logic
-        step = int(max(1, fps / sample_rate))
-        indices = list(range(0, frame_count - 1, step))
-        frames = vr.get_batch(indices).asnumpy()
-        return {
-            "images": [f for f in frames],
-            "original_indices": indices,
-            "video_info": {"fps": fps, "frame_count": frame_count, "sample_rate": sample_rate},
-            "final_num_frames_sampled" : len(indices),
-            "video_sample_method" : "uniform",
-            "pct_final_num_from_uniform": round(len(indices) / expected_uniform_count, 4)
-        }
+    # if expected_uniform_count <= uniform_sample_size_limit:
+    #     logging.info(f"[DEBUG] Video {video_path} is within limit ({expected_uniform_count} frames). Using Uniform Sampling.")
+    #     # Uniform sampling logic
+    #     step = int(max(1, fps / SCAN_HZ))
+    #     indices = list(range(0, frame_count - 1, step))
+    #     frames = vr.get_batch(indices).asnumpy()
+    #     return {
+    #         "images": [f for f in frames],
+    #         "original_indices": indices,
+    #         "video_info": {"fps": fps, "frame_count": frame_count, "sample_rate": SCAN_HZ},
+    #         "final_num_frames_sampled" : len(indices),
+    #         "video_sample_method" : "uniform",
+    #         "pct_final_num_from_uniform": round(len(indices) / expected_uniform_count, 4),
+    #         "expected_uniform_count": expected_uniform_count
+    #     }
 
     # --- TIER 2: CLIP RELEVANCE PIPELINE (For Long Videos) ---
     logging.info(f"[DEBUG] Video {video_path} exceeds budget. Initiating CLIP filtering.")
 
     # --- 1. COARSE SCAN (0.5 FPS) ---
-    CLIP_SCAN_HZ = sample_rate
-    scan_step = int(max(1, fps / CLIP_SCAN_HZ))
+    # CLIP_SCAN_HZ = sample_rate
+    scan_step = int(max(1, fps / SCAN_HZ))
     coarse_indices = list(range(0, frame_count - 1, scan_step))
     coarse_frames = vr.get_batch(coarse_indices).asnumpy()
     
-    cleaned_props = []
+    general_templates = [
+        "a video frame of {}.",
+        "a screenshot of {}.",
+        "{}"  # Raw string often performs well for long descriptions
+    ]
+    subtitle_templates = [
+        "a screenshot with the subtitle: '{}'",
+        "the text '{}' displayed on screen",
+        "a video frame containing the text '{}'"
+    ]
+    
+    # cleaned_props = []
+    # for p in propositions:
+    #     clean = p.replace("subtitle_", "").replace("_", " ")
+    #     if clean.startswith("n_"):
+    #         clean = clean[2:]
+    #     cleaned_props.append(clean)
+
+    # print(f"[DEBUG] Video {video_path} FPS {fps} Length {frame_count} Scanning {len(coarse_indices)} frames for {len(cleaned_props)} Proposition...\nSampled Frame: {coarse_indices}")
+    
+    # print(f'[DEBUG] Max coarse index: {max(coarse_indices)}\nFrame Count: {frame_count}')
+    # prop_embeddings = model.encode(cleaned_props, convert_to_tensor=True)
+
+    prop_embeddings = []
     for p in propositions:
+        # Create all templated versions for this specific proposition
+        is_subtitle = p.startswith("subtitle_")
+        
+        # Cleaning logic
         clean = p.replace("subtitle_", "").replace("_", " ")
         if clean.startswith("n_"):
             clean = clean[2:]
-        cleaned_props.append(clean)
+            
+        # Select the correct template set
+        current_templates = subtitle_templates if is_subtitle else general_templates
+        templated_versions = [t.format(clean) for t in current_templates]
+        
+        # Encode all versions at once
+        # Note: Ensure your 'model' is a CLIP-based SentenceTransformer
+        with torch.no_grad():
+            versions_embs = model.encode(templated_versions, convert_to_tensor=True)
+            
+            # Average the embeddings for this proposition and normalize
+            # Taking the mean across the 'versions' dimension
+            avg_emb = torch.mean(versions_embs, dim=0, keepdim=True)
+            avg_emb = torch.nn.functional.normalize(avg_emb, p=2, dim=1)
+            prop_embeddings.append(avg_emb)
 
-    print(f"[DEBUG] Video {video_path} FPS {fps} Length {frame_count} Scanning {len(coarse_indices)} frames for {len(cleaned_props)} Proposition...\nSampled Frame: {coarse_indices}")
-    
-    print(f'[DEBUG] Max coarse index: {max(coarse_indices)}\nFrame Count: {frame_count}')
-    prop_embeddings = model.encode(cleaned_props, convert_to_tensor=True)
+    # Concatenate into a single tensor for similarity comparison [4, embedding_dim]
+    prop_embeddings = torch.cat(prop_embeddings, dim=0)
+
     frame_scores = []
     
     with torch.no_grad():
         coarse_embs = model.encode([Image.fromarray(f) for f in coarse_frames], 
-                                   convert_to_tensor=True, show_progress_bar=True)
-        
+                                   convert_to_tensor=True, show_progress_bar=True, normalize_embeddings=True)
         for i, idx in enumerate(coarse_indices):
             similarities = util.cos_sim(coarse_embs[i], prop_embeddings)[0]
             max_sim = float(torch.max(similarities))
@@ -81,22 +134,23 @@ def read_video_adaptive(model, video_path, propositions,
         
     if not top_anchors:
         logging.info("[WARNING] CLIP Relevant Search Speedup Failed, Switching Back to Uniform Sampling")
-        uniform_sample_count = int(duration_total * sample_rate)
+        uniform_sample_count = int(duration_total * SCAN_HZ)
         sample_method = "uniform"
         if uniform_sample_count > uniform_sample_size_limit:
             logging.info(f"[WARNING] Video {video_path} not is within budget ({uniform_sample_count} frames). Using Uniform Samplin Limit: {uniform_sample_size_limit}.")
             uniform_sample_count = uniform_sample_size_limit
             sample_method = f"uniform_limit_{uniform_sample_size_limit}"
 
-        indices = np.linspace(0, frame_count - 1, num=uniform_sample_size_limit, dtype=int).tolist()   
+        indices = np.linspace(0, frame_count - 1, num=uniform_sample_count, dtype=int).tolist()   
         frames = vr.get_batch(indices).asnumpy()
         return {
             "images": frames,
             "original_indices": indices,
-            "video_info": {"fps": fps, "frame_count": frame_count, "sample_rate" : sample_rate},
+            "video_info": {"fps": fps, "frame_count": frame_count, "sample_rate" : SCAN_HZ},
             "final_num_frames_sampled" : len(indices),
             "video_sample_method" : sample_method,
-            "pct_final_num_from_uniform": round(len(indices) / expected_uniform_count, 4)
+            "pct_final_num_from_uniform": round(len(indices) / expected_uniform_count, 4),
+            "expected_uniform_count": expected_uniform_count
         }
 
     # Convert anchors to time-windows (1s padding each side)
@@ -133,7 +187,7 @@ def read_video_adaptive(model, video_path, propositions,
         
         # Calculate how many frames we WOULD have at the requested sample_rate
         # If sample_rate is 1, a 10s segment wants 10 frames.
-        requested_samples = int(segment_duration * sample_rate)
+        requested_samples = int(segment_duration * SCAN_HZ)
         
         # If the requested amount is within our 'safe' VLM budget, use it.
         # If it's too long, we 'compress' the segment into our max_frames_per_segment.
@@ -155,7 +209,7 @@ def read_video_adaptive(model, video_path, propositions,
 
     with torch.no_grad():
         final_embs = model.encode([Image.fromarray(f) for f in final_frames_data], 
-                                  convert_to_tensor=True, show_progress_bar=True)
+                                  convert_to_tensor=True, show_progress_bar=True, normalize_embeddings=True)
 
     deduplicated_indices = [raw_final_indices[0]]
     last_kept_idx = 0
@@ -190,8 +244,10 @@ def read_video_adaptive(model, video_path, propositions,
     final_frames = vr.get_batch(deduplicated_indices).asnumpy()
     return {
         "images": [f for f in final_frames],
+        "stage1_indices" : raw_final_indices,
         "original_indices": deduplicated_indices,
-        "video_info": {"fps": fps, "frame_count": frame_count, "sample_rate": sample_rate},
+        "video_info": {"fps": fps, "frame_count": frame_count, "sample_rate": SCAN_HZ},
+        "expected_uniform_count": expected_uniform_count,
         "video_sample_method": "two-stage clip",
         "clip_metrics" : clip_metrics,
         "final_num_frames_sampled" : len(deduplicated_indices),

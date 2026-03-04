@@ -180,7 +180,7 @@ def run_nsvs_ablation(
         log_metrics("num_frame_windows", len(frame_windows))
 
     all_detections = [set(), set()]
-    
+    gt_indices = set()
     for i, window in looper:
         if PRINT_ALL:
             print("\n" + "*"*50 + f" {i}/{len(frame_windows)-1} " + "*"*50)
@@ -208,6 +208,13 @@ def run_nsvs_ablation(
         # if PRINT_ALL and False: # disabled
         #     os.makedirs(image_output_dir, exist_ok=True)
         #     frame.save_frame_img(save_path=os.path.join(image_output_dir, f"{i}"))
+        if config.adaptive_gt:
+            high_conf_objects = frame.thresholded_detected_objects(0.8)
+            if len(high_conf_objects) > 0:
+                print(f"GT Frame detected: idx {frame.frame_idx_list}")
+                # Add all indices in this batch (since they share the detection)
+                gt_indices.update(frame.frame_idx_list)
+
         if checker.validate_frame(frame_of_interest=frame):
             thresh = frame.thresholded_detected_objects(threshold=detection_threshold)
             for prop in thresh.keys():
@@ -217,7 +224,6 @@ def run_nsvs_ablation(
                 print(f"\t{all_detections}")
 
             add_automaton_model_check_start = time.perf_counter() if measure_metrics else 0
-            print(f'[DEBUG] Frame {frame} added to automaton')
             automaton.add_frame(frame=frame)
             frame_of_interest.add_frame(frame)
 
@@ -251,7 +257,7 @@ def run_nsvs_ablation(
         )
 
         if not foi or foi == [-1]:
-            MAX_GAPS_CLIP = 3 * 60 * video_data['video_info']['fps']
+            MAX_GAPS_CLIP = 15 * video_data['video_info']['fps']
             
             # Get either AI hits or CLIP indices
             source_indices = sorted(list(set().union(*all_detections)))
@@ -270,6 +276,8 @@ def run_nsvs_ablation(
             if measure_metrics:
                 log_metrics("num_model_checks", _model_check_count)
                 log_metrics("num_vlm_detections", _vlm_detection_count)
+                if config.adaptive_gt:
+                    time_metrics["gt_frames"] = sorted(list(gt_indices))
                 return foi, all_detections, [-1], time_metrics
             return foi, all_detections, [-1], None
 
@@ -312,6 +320,9 @@ def run_nsvs_ablation(
         if measure_metrics:
             log_metrics("num_model_checks", _model_check_count)
             log_metrics("num_vlm_detections", _vlm_detection_count)
+            if config.adaptive_gt:
+                    time_metrics["gt_frames"] = sorted(list(gt_indices))
+                    print(f'[DEBUG] Ground Truth indices: {time_metrics["gt_frames"]}')
             return foi, all_detections, merged, time_metrics
         return foi, all_detections, merged, None
     
@@ -323,7 +334,9 @@ def run_nsvs_ablation(
         if not automaton_foi: # automaton empty or nothing detected
             foi = [-1]
         else:
-            detections_foi = [intersection_with_gaps(all_detections)]
+            fps = video_data['video_info']['fps']
+            detections_foi = intersection_with_gaps(all_detections, max_gaps=fps * CONTEXT_SECONDS)
+            print(detections_foi)
             detections_foi = list(range(int(min(detections_foi)), int(max(detections_foi)) + 1))
             if PRINT_ALL:
                 print(f"Detection indices: {detections_foi}")
@@ -333,35 +346,53 @@ def run_nsvs_ablation(
                 foi = [-1]
             else:
                 foi = [min(foi), max(foi)]
-        if foi != [-1]:
-            fps = video_data['video_info']['fps']
-            frame_count = video_data['video_info']["frame_count"]
-            MAX_GAPS = BRIDGE_MULT * fps
-            tw_before, tw_after = resolve_target_window(target_window)
-            final_ranges = []
+        
+        if foi == [-1]:
+            print("[WARNING] Automaton Retuned Empty!")
+            print("\n" + "-"*107)
+            print(f"Automaton_foi {[]}")
+            print(f"All Detections: {all_detections}")
+            print(f"Detected frames of interest: {[-1]}")
+            print(f"Merged Frames of Interests: {[-1]}")
+            if measure_metrics:
+                log_metrics("num_model_checks", _model_check_count)
+                log_metrics("num_vlm_detections", _vlm_detection_count)
+                if config.adaptive_gt:
+                    time_metrics["gt_frames"] = sorted(list(gt_indices))
+                    print(f'[DEBUG] Ground Truth indices: {time_metrics["gt_frames"]}')
+                return foi, all_detections, [-1], time_metrics
+            return [-1], all_detections, [-1], None
+
+        fps = video_data['video_info']['fps']
+        frame_count = video_data['video_info']["frame_count"]
+        MAX_GAPS = BRIDGE_MULT * fps
+        tw_before, tw_after = resolve_target_window(target_window)
+        final_ranges = []
+        
+        if not isinstance(foi[0], list):
+            foi = [foi]
+        for foi_group in foi:
+            group_min, group_max = min(foi_group), max(foi_group)
             
-            for foi_group in foi:
-                group_min, group_max = min(foi_group), max(foi_group)
-                
-                # Calculate boundaries with padding
-                start_ext = max(0, int(group_min + tw_before * fps))
-                end_ext = min(frame_count - 1, int(group_max + tw_after * fps))
-                
-                # Instead of update(range(...)), we just store the boundary
-                final_ranges.append((start_ext, end_ext))
-                
-            final_ranges.sort()
-            merged = []
-            if final_ranges:
-                curr_start, curr_end = final_ranges[0]
-                for next_start, next_end in final_ranges[1:]:
-                    # If the next range starts before the current one ends (plus MAX_GAPS)
-                    if next_start <= curr_end + MAX_GAPS:
-                        curr_end = max(curr_end, next_end)
-                    else:
-                        merged.append((curr_start, curr_end))
-                        curr_start, curr_end = next_start, next_end
-                merged.append((curr_start, curr_end))
+            # Calculate boundaries with padding
+            start_ext = max(0, int(group_min + tw_before * fps))
+            end_ext = min(frame_count - 1, int(group_max + tw_after * fps))
+            
+            # Instead of update(range(...)), we just store the boundary
+            final_ranges.append((start_ext, end_ext))
+            
+        final_ranges.sort()
+        merged = []
+        if final_ranges:
+            curr_start, curr_end = final_ranges[0]
+            for next_start, next_end in final_ranges[1:]:
+                # If the next range starts before the current one ends (plus MAX_GAPS)
+                if next_start <= curr_end + MAX_GAPS:
+                    curr_end = max(curr_end, next_end)
+                else:
+                    merged.append((curr_start, curr_end))
+                    curr_start, curr_end = next_start, next_end
+            merged.append((curr_start, curr_end))
 
         if True:
             print("\n" + "-"*107)
@@ -369,12 +400,14 @@ def run_nsvs_ablation(
             print(f"All Detections: {all_detections}")
             print("Detected frames of interest:")
             print(foi)
-
-        logging.info(f"Merged Frames of Interests: {merged}")
+            print(f"Merged Frames of Interests: {merged}")
 
         if measure_metrics:
             log_metrics("num_model_checks", _model_check_count)
             log_metrics("num_vlm_detections", _vlm_detection_count)
+            if config.adaptive_gt:
+                    time_metrics["gt_frames"] = sorted(list(gt_indices))
+                    print(f'[DEBUG] Ground Truth indices: {time_metrics["gt_frames"]}')
             return foi, all_detections, merged, time_metrics
         
         vlm.clear_gpu_memory()

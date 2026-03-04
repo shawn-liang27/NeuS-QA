@@ -17,8 +17,8 @@ import sys
 
 PRINT_ALL = False
 
-BRIDGE_MULT =  5 # seconds
-CONTEXT_SECONDS = 5 # Look for P/Q within 10 seconds of a handover
+BRIDGE_MULT =  3 # seconds
+CONTEXT_SECONDS = 3 # Look for P/Q within 3 seconds of a handover
 
 warnings.filterwarnings("ignore")
 

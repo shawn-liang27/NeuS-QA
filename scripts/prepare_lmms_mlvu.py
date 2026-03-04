@@ -90,7 +90,7 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--experiment")
+    parser.add_argument("--experiment_number")
     parser.add_argument("--nsvs_path")
     parser.add_argument("--num_split", type=int, default=8)
     parser.add_argument("--task_type", type=str, default="rt-neus")

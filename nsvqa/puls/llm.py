@@ -3,6 +3,7 @@ import datetime
 import json
 import os
 from nsvqa.puls.prompts import *
+import logging
 
 class LLM:
     def __init__(self, model="gpt-4o", history=None, save_dir=""):
@@ -18,7 +19,10 @@ class LLM:
             os.makedirs(save_dir, exist_ok=True)
 
     def run_puls(self, question):
-        """Executes the two-stage PULS chain with matching few-shot styles."""
+        """
+        Executes two-stage chain. 
+        Returns is_valid=False if extraction fails, allowing downstream fallback.
+        """
         # --- STAGE 1: Extraction ---
         self.history = [{"role": "system", "content": PROPOSITION_EXTRACTOR_SYSTEM}]
         prop_query = f"Question: \"{question}\""
@@ -26,27 +30,36 @@ class LLM:
         
         try:
             props_data = json.loads(prop_res)
-            propositions = props_data.get("proposition", ["scene appears"])
-        except:
-            propositions = ["scene appears"]
+            propositions = props_data.get("proposition", [])
+            if not propositions:
+                return {"proposition": [], "specification": "", "is_valid": False}
+        except Exception as e:
+            logging.warning(f"Proposition extraction failed: {e}")
+            return {"proposition": [], "specification": "", "is_valid": False}
 
         # --- STAGE 2: Specification Generation ---
         self.history.append({"role": "system", "content": TL_GENERATOR_SYSTEM})
-        
-        spec_query = f"Question: \"{question}\" | Props: {propositions}"
+        spec_query = f"Question: \"{question}\"\nPropositions: {propositions}"
         spec_res = self.prompt(spec_query)
         
         try:
             spec_data = json.loads(spec_res)
-            specification = spec_data.get("specification", f"({propositions[0]})")
-        except:
-            specification = f"({propositions[0]})"
-
-        return {
-            "proposition": propositions,
-            "specification": specification
-        }
-
+            specification = spec_data.get("specification", "")
+            supp_props = spec_data.get("supplementary_propositions", [])
+            
+            if not specification:
+                return {"proposition": propositions, "specification": "", "is_valid": False}
+                
+            final_propositions = list(set(propositions + supp_props))
+            return {
+                "proposition": final_propositions,
+                "specification": specification,
+                "is_valid": True
+            }
+        except Exception as e:
+            logging.warning(f"Specification generation failed: {e}")
+            return {"proposition": propositions, "specification": "", "is_valid": False}
+    
     def prompt(self, p):
         """Sends a message to GPT-4o with history and JSON constraints."""
         self.history.append({"role": "user", "content": p})

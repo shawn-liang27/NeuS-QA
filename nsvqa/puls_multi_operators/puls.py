@@ -54,13 +54,12 @@ def process_specification(specification, propositions):
         reverse=True
     )
     for original, new in replacements:
-        quoted_original = f'"{original}"'
-        if quoted_original in specification:
-            # Replace the quoted version with a single-quoted new label
-            specification = specification.replace(quoted_original, f'"{new}"')
-        elif original in specification:
-            # Replace the unquoted version and add quotes
-            specification = specification.replace(original, f'"{new}"')
+            # We use a regex to find the 'original' text even if the LLM 
+            # surrounded it with mixed quotes, backslashes, or single quotes.
+            # This replaces the entire 'messy' chunk with a clean '"slug"'
+            pattern = re.escape(original)
+            # Matches the original string and any surrounding quotes/whitespace
+            specification = re.sub(rf'[\'\"\\ ]*{pattern}[\'\"\\ ]*', f' "{new}" ', specification)
             
     if " UNTIL " not in specification:
         if not is_balanced(specification):
@@ -80,7 +79,7 @@ def process_specification(specification, propositions):
                     nested = f"({p} UNTIL {nested})"
                 specification = nested
 
-    replacements = {
+    logic_map = {
         "AND": "&",
         "OR": "|",
         "UNTIL": "U",
@@ -88,8 +87,9 @@ def process_specification(specification, propositions):
         "EVENTUALLY": "F",
         "NOT": "!"
     }
-    for word, symbol in replacements.items():
-        specification = specification.replace(word, symbol)
+    for word, symbol in logic_map.items():
+        # Space-padded replace to prevent "AND" inside "EXPAND" being caught
+        specification = re.sub(rf'\b{word}\b', symbol, specification)
 
     open_p = specification.count("(")
     close_p = specification.count(")")

@@ -7,26 +7,21 @@ JOB_ID=$(date +%Y%m%d_%H%M%S)
 export HF_HOME="$HOME/.cache/huggingface"
 export DECORD_EOF_RETRY_MAX=40960
 
-TOTAL_SPLITS=4
+TOTAL_SPLITS=8
 GPU_START=$1
 RUN_NUMBER=$2
-ABLATION_TYPE=$3 # stage1 stage2 batched segments, adaptive, adaptive_gt
-BENCHMARK=lvb
+BENCHMARK=mlvu
 export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 
 # Variables
-DATA_DIR="/usr/homes/sgl57/.data/LongVideoBench"
-# BURNED_DIR="/usr/homes/sgl57/.data/LongVideoBench/burn-subtitles/T3E_E3E_T3O_O3O_mix"
-BURNED_DIR="/usr/homes/sgl57/.data/LongVideoBench/burn-subtitles/T3E_E3E_T3O_O3O_mix_2026_01_14_21_55"
+DATA_DIR="/usr/homes/sgl57/.data/mlvu/MLVU"
+BURNED_DIR="/usr/homes/sgl57/.data/mlvu/MLVU"
 MODEL="InternVL2-8B"
-MAX_TOKEN_LEN=65000
-
-CATEGORIES=("T3E" "E3E" "T3O" "O3O") # "T3E", "E3E", "T3O", "O3O"
+CATEGORIES=("2_needle" "3_ego")
 CAT_STR=$(IFS='_'; echo "${CATEGORIES[*]}")
 
-
-OUT_DIR="$JOB_DIR/experiment_results/nsvs_improved/ablation/ablation_${ABLATION_TYPE}_${RUN_NUMBER}"
-CONFIG_FILE="/usr/homes/sgl57/NeuS-VLM/NeuS-QA/experiment_results/nsvs_improved/ablation/config_${ABLATION_TYPE}.json"
+OUT_DIR="$JOB_DIR/experiment_results/neusqa/mlvu/experiment_${RUN_NUMBER}"
+CONFIG_FILE="/usr/homes/sgl57/NeuS-VLM/NeuS-QA/experiment_results/neusqa/config.json"
 
 mkdir -p "$OUT_DIR"
 
@@ -65,9 +60,8 @@ launch_worker() {
         --total_splits "${TOTAL_SPLITS}" \
         --categories "${CATEGORIES[@]}" \
         --config "${CONFIG_FILE}" \
-        --save_crop \
-        --measure_metrics \
         --benchmark "${BENCHMARK}" \
+        --measure_metrics \
         >"${WORKER_LOG}_eval.out" 2>&1
 
     local PY_EXIT=$?

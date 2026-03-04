@@ -1,6 +1,8 @@
 from nsvqa.target_identification.target_identification import *
 from nsvqa.nsvs.model_checker.frame_validator import *
 from nsvqa.datamanager.longvideobench import *
+from nsvqa.datamanager.video_mme import *
+from nsvqa.datamanager.mlvu import *
 from nsvqa.nsvs.video.read_video import *
 from nsvqa.datamanager.custom import *
 from nsvqa.nsvs.vlm.obj import *
@@ -20,7 +22,7 @@ import logging
 from pathlib import Path
 import traceback
 import time
-from collections import defaultdict
+import sys
 
 from nsvqa.nsvs.video.read_video_adaptive import read_video_adaptive
 
@@ -30,6 +32,7 @@ class ModelConfig(BaseModel):
     vlm_method: str
     read_video_method: str
     return_segments: bool
+    adaptive_gt: bool = False
 
 def exec_puls(entry, save_dir): # Step 1
     print("PULS is called")
@@ -116,6 +119,7 @@ def exec_nsvs(entry, sample_rate, device, model, clip_model, vlm, measure_metric
     entry["frames_of_interest"] = frames_of_interest
 
     if measure_metrics:
+        run_metrics["frames_of_interest"] = frames_of_interest
         print(run_metrics)
         for metric, value in run_metrics.items():
             entry["time_metrics"][metric] = value
@@ -151,10 +155,21 @@ def run_nsvqa(output_dir, llm_convo_dir, current_split, total_splits, vlm_config
 
         # 2. Module: PULS
         p_start = time.perf_counter() if measure_metrics else 0
+        
         exec_puls(entry, llm_convo_dir)
         if measure_metrics: 
             metrics["PULS_time"] = time.perf_counter() - p_start
             metrics["num_propositions"] = len(entry["puls"]["proposition"])
+        if not entry["puls"]["proposition"]:
+            entry["nsvs"] = {}
+            entry["nsvs"]["output"] = []
+            entry["nsvs"]["indices"] = []
+            if "metadata" not in entry:
+                entry["metadata"] = {}
+            entry["metadata"]["error"] = f"PULS failed to process Propositions and Specification for Task: {entry["metadata"].get("id", "Unknown")}, Returning Full Video Length"
+            entry["frames_of_interest"] = [-1]
+            logging.critical(f'PULS failed to process Propositions and Specification for Task: {entry["metadata"].get("id", "Unknown")}, Returning Full Video Length')
+            continue
 
         # 3. Module: Target Identification
         tid_start = time.perf_counter() if measure_metrics else 0
@@ -202,6 +217,7 @@ def main(args):
     with open(args.config, "r") as f:
         raw_data = json.load(f)
     config = ModelConfig(**raw_data)
+
     print(f'RUN CONFIG: {config}')
     os.makedirs(experiment_dir, exist_ok=True)
     os.makedirs(f'{experiment_dir}/nsvqa_output', exist_ok=True)
@@ -214,12 +230,26 @@ def main(args):
     nsvs_llm_convo_dir = f"{experiment_dir}/llm_conversation_history/"
 
     print(f'Loading Data from Data_Dir: {args.data_dir}\nBurned_Dir: {args.burned_dir}')
-        
-    data_loader = LongVideoBench(dataset_path=args.data_dir, burned_path=args.burned_dir, postprocess_dir=postprocess_dir, categories=args.categories)
+    
+    benchmark = args.benchmark
+    if benchmark == "mlvu":
+        data_loader = MLVU(dataset_path=args.data_dir, burned_path=args.burned_dir, postprocess_dir=postprocess_dir, categories=args.categories)
+    elif benchmark == "video_mme":
+        data_loader = VideoMME(dataset_path=args.data_dir, burned_path=args.burned_dir, postprocess_dir=postprocess_dir, categories=args.categories)
+    elif benchmark == "lvb":
+        data_loader = LongVideoBench(dataset_path=args.data_dir, burned_path=args.burned_dir, postprocess_dir=postprocess_dir, categories=args.categories)
+    elif benchmark == "adaptive_gt":
+        with open("/usr/homes/sgl57/NeuS-VLM/NeuS-QA/experiment_results/nsvs_improved/ablation/adaptive_gt.json", "r") as f:         
+            gt_data = json.load(f)
+        data_loader = Custom(raw_data=gt_data, burned_dir=args.burned_dir, dataset_path=args.data_dir, postprocess_dir=postprocess_dir)
+    else:
+        logging.CRITICAL(f"Benchmark {benchmark} is not implemented. Please choose from the following: mlvu, video_mme, lvb")
+        sys.exit(1)
 
     run_nsvqa(output_dir=nsvqa_dir, llm_convo_dir=nsvs_llm_convo_dir, current_split=args.current_split, total_splits=args.total_splits, vlm_config=vlm_config, data_dir=args.data_dir, data_loader=data_loader, config=config, measure_metrics=args.measure_metrics)
     # Time PostProcess
-    data_loader.postprocess_data(nsvqa_dir, args.measure_metrics)
+    if args.save_crop:
+        data_loader.postprocess_data(nsvqa_dir, args.measure_metrics)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -232,7 +262,9 @@ if __name__ == "__main__":
     parser.add_argument("--current_split", type=int)
     parser.add_argument("--total_splits", type=int)
     parser.add_argument('--categories', nargs='+', type=str)
-    parser.add_argument("--measure_metrics", action='store_true', default = False)
+    parser.add_argument("--measure_metrics", action='store_true')
+    parser.add_argument("--save_crop", action='store_true')
+    parser.add_argument("--benchmark", type=str, default="lvb")
     
     args = parser.parse_args()
     main(args)

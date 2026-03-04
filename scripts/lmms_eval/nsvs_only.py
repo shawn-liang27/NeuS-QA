@@ -100,9 +100,9 @@ def exec_nsvs(entry, sample_rate, device, model, clip_model, vlm, measure_metric
     entry["nsvs"]["output"] = output
     entry["nsvs"]["indices"] = [list(s) for s in indices]
     entry["frames_of_interest"] = frames_of_interest
-
+    
     if measure_metrics:
-        print(run_metrics)
+        run_metrics["frames_of_interest"] = frames_of_interest
         for metric, value in run_metrics.items():
             entry["time_metrics"][metric] = value
 
@@ -136,6 +136,17 @@ def run_nsvqa(output_dir, llm_convo_dir, current_split, total_splits, vlm_config
             metrics["PULS_time"] = time.perf_counter() - p_start
             metrics["num_propositions"] = len(entry["puls"]["proposition"])
 
+        if not entry["puls"]["proposition"]:
+            entry["nsvs"] = {}
+            entry["nsvs"]["output"] = []
+            entry["nsvs"]["indices"] = []
+            if "metadata" not in entry:
+                entry["metadata"] = {}
+            entry["metadata"]["error"] = f"PULS failed to process Propositions and Specification for Task: {entry["metadata"].get("id", "Unknown")}, Returning Full Video Length"
+            entry["frames_of_interest"] = [-1]
+            logging.critical(f'PULS failed to process Propositions and Specification for Task: {entry["metadata"].get("id", "Unknown")}, Returning Full Video Length')
+            continue
+
         # 3. Module: Target Identification
         tid_start = time.perf_counter() if measure_metrics else 0
         exec_target_identification(entry, llm_convo_dir)
@@ -145,19 +156,17 @@ def run_nsvqa(output_dir, llm_convo_dir, current_split, total_splits, vlm_config
         n_start = time.perf_counter() if measure_metrics else 0
         # Pass the pre-initialized vlm here
         exec_nsvs(entry, sample_rate=1, device=vlm_config[0], model=vlm_config[1], clip_model=clip_model, vlm=vlm, measure_metrics=measure_metrics)
+        print(f'Neus Complete with question {entry["metadata"]["id"]}')
         if measure_metrics: metrics["NeuS_time"] = time.perf_counter() - n_start
 
         # 5. Finalize Total Time
         if measure_metrics:
             metrics["completion_time"] = time.perf_counter() - t_start
             metrics["metadata"] = entry.get("metadata", {}).copy()
-            
-            print(f'Neus Complete with question {entry["metadata"]["id"]}')
-            print(f'Runtime metrics on {entry["metadata"]["id"]}:\n{entry["time_metrics"]}')
 
             time_metrics = entry.pop("time_metrics", {})
             metrics.update(time_metrics)
-            
+            print(f'Runtime metrics on {entry["metadata"]["id"]}:\n{metrics}')
             metrics_output.append(metrics)
 
         output.append(entry)

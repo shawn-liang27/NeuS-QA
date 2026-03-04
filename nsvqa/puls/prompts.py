@@ -2,10 +2,13 @@ PROPOSITION_EXTRACTOR_SYSTEM = """
 You are a Video Logic Parser. Extract atomic visual propositions from the user's question.
 
 ### RULES:
-1. Extract object-action or object-object relationships.
-2. SUBTITLES: Use format `subtitle_'TEXT'`. Do NOT add words like "appears" or "says".
-3. NO AMBIGUITY: Omit phrases like "someone doing something".
-4. SAFETY FALLBACK: NEVER return an empty list. If the question is about a simple subject (e.g., "Who is..."), extract the subject as a proposition: ["person appears"].
+1. RELATIONSHIPS ONLY: Every proposition must be an object-action or object-object relationship. NEVER extract standalone nouns (e.g., "tank", "rifle").
+3. SUBTITLE FORMAT: Use format subtitle_TEXT. 
+   - The TEXT must be a literal transcription. 
+   - DO NOT use internal quotes inside the subtitle string.
+   - A subtitle functions as a single atomic unit. DO NOT extract separate propositions or objects from the text inside a subtitle.
+5. NO LOGIC: Do not include "and", "or", "not", "until" within a single proposition.
+6. NO AMBIGUITY: Omit vague phrases like "does something", "happens", or "is there". Propositions must contain concrete, verifiable visual actions or states.
 
 ### EXAMPLES:
 Question: "Who is the first person to appear?" 
@@ -55,3 +58,50 @@ Question: "A news anchor with curled hair is wearing a pink blazer over a black 
 ### OUTPUT:
 Return ONLY a JSON object with the key "specification".
 """
+
+# TL_GENERATOR_SYSTEM = """
+# ### SYSTEM ROLE
+# You are a Logic Reasoning Agent. Convert provided propositions into a Temporal Logic (TL) formula.
+
+# ### DYNAMIC PROPOSITION RULE
+# If the logic requires an event or state change NOT in the provided list, you MAY create a new, concrete proposition.
+# - New propositions must be visually descriptive (e.g., "woman_leaves_path").
+# - Add these to the "supplementary_propositions" list in your output.
+
+# ### LOGIC RULES
+# 1. Use ONLY these operators: AND, OR, NOT, UNTIL.
+# 2. Every provided proposition MUST be used.
+# 3. PARENTHESIS HIERARCHY: Use parentheses for complex groupings: (A AND B) UNTIL C.
+
+# ### EXAMPLES
+# Question: "Who is the first person to appear?" 
+# Propositions: ["person appears"] 
+# -> {
+#     "specification": "person appears",
+#     "supplementary_propositions": []
+# }
+
+# Question: "What does the child do after falling?" 
+# Propositions: ["child plays with kite", "child runs around", "child falls"]
+# -> {
+#     "specification": "(child plays with kite AND child runs around) UNTIL child falls",
+#     "supplementary_propositions": []
+# }
+
+# Question: "A woman walks on a path. What did she do after leaving the path?" 
+# Propositions: ["woman walks on path"]
+# -> {
+#     "specification": "woman walks on path UNTIL woman leaves path",
+#     "supplementary_propositions": ["woman leaves path"]
+# }
+
+# Question: "What happened before the caption 'standards our climate editor Justin rout' appeared?" 
+# Propositions: ["news anchor reading news", "subtitle_'standards our climate editor Justin rout'"]
+# -> {
+#     "specification": "news anchor reading news UNTIL subtitle_'standards our climate editor Justin rout'",
+#     "supplementary_propositions": []
+# }
+
+# ### OUTPUT
+# Return ONLY a JSON object with "specification" and "supplementary_propositions".
+# """

@@ -60,6 +60,7 @@ class InternVL:
         logging.info(f"Using dynamic batch {self.model.config.max_dynamic_patch}")
         self.model.apply(self.move_tensors_to_gpu)
         self.tokenizer = AutoTokenizer.from_pretrained(self._path, trust_remote_code=True, use_fast=False)
+        self.num_frame = 32
 
     def reset_model(self) -> None:
         """Reset the model to its initial state using pretrained weights."""
@@ -314,6 +315,72 @@ class InternVL:
             else:
                 batch_confidences.append(0.0)
         return responses, batch_confidences
+    
+    def vqa(self, question, video, generation_config=None):
+        """
+        Video Question Answering inference.
+        
+        Args:
+            question (str): The text question.
+            video (str or dict): Either a string file path or a dictionary containing 
+                                 {'path': str, 'segments': list} for RT-NeuS logic.
+            generation_config (dict, optional): Configuration for text generation.
+        """
+        # Set default generation config if not provided
+        if generation_config is None:
+            generation_config = dict(max_new_tokens=1024, do_sample=False)
+
+        # --- 1. Load Video Pixel Values ---
+        if isinstance(video, dict):
+            if "segments" in video:
+                # RT-NeuS Logic: Use the virtual timeline uniform sampler
+                video_path = video["path"]
+                segments = video["segments"]
+                
+                # NOTE: Ensure load_video_uniformly_from_segments is imported/available
+                pixel_values, num_patches_list = load_video_uniformly_from_segments(
+                    video_path, 
+                    segments=segments, 
+                    num_segments=self.num_frame
+                )
+            else:
+                # Standard Logic: Fallback to original uniform loading across whole video
+                video_path = video.get("path")
+                print(f'[DEBUG] Reading Full Video: {video_path}')
+                pixel_values, num_patches_list = load_video(
+                    video_path, 
+                    num_segments=self.num_frame
+                )
+        else:
+            # Standard Logic: Input is just a string path
+            pixel_values, num_patches_list = load_video(
+                video, 
+                num_segments=self.num_frame
+            )
+
+        # --- 2. Prepare Tensors ---
+        # Move tensors to GPU and cast to bfloat16 (standard for InternVL)
+        pixel_values = pixel_values.to(torch.bfloat16).cuda()
+
+        # --- 3. Construct Prompt ---
+        # Add frame indices: "Frame1: <image>\nFrame2: <image>..."
+        video_prefix = "".join([f"Frame{i+1}: <image>\n" for i in range(len(num_patches_list))])
+        
+        # Combine the visual prefix with the user question
+        full_prompt = video_prefix + question
+        
+        # --- 4. Generate Response ---
+        response, history = self.model.chat(
+            self.tokenizer, 
+            pixel_values, 
+            full_prompt, 
+            generation_config, 
+            num_patches_list=num_patches_list, 
+            history=None, 
+            return_history=True
+        )
+        
+        return response
 
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
@@ -333,6 +400,49 @@ def build_transform(input_size: int) -> T.Compose:
         ]
     )
 
+def load_video_uniformly_from_segments(video_path, segments, input_size=448, max_num=1, num_segments=32):
+    """
+    Simulates uniform sampling from a cropped video by mapping 
+    global indices back to the original non-contiguous frame indices.
+    """
+    vr = VideoReader(video_path, ctx=cpu(0), num_threads=1)
+    transform = build_transform(input_size=input_size)
+    
+    # 1. Map segments to a single "Virtual Timeline"
+    # We create a list of all frame indices that would exist in a cropped video
+    virtual_timeline = []
+    for start, end in segments:
+        virtual_timeline.extend(range(int(start), int(end) + 1))
+    
+    total_virtual_frames = len(virtual_timeline)
+    
+    # 2. Use the original logic to get indices across the virtual total length
+    # We use a simplified version of your get_index logic on the virtual timeline
+    seg_size = float(total_virtual_frames) / num_segments
+    
+    # These are indices into our 'virtual_timeline' list
+    virtual_indices = [int((seg_size / 2) + np.round(seg_size * idx)) for idx in range(num_segments)]
+    
+    # Clip to avoid index errors at the very end
+    virtual_indices = [min(i, total_virtual_frames - 1) for i in virtual_indices]
+    
+    # 3. Map virtual indices back to original video frame indices
+    original_frame_indices = [virtual_timeline[i] for i in virtual_indices]
+
+    # 4. Extract and Process
+    pixel_values_list, num_patches_list = [], []
+    frames = vr.get_batch(original_frame_indices).asnumpy()
+    
+    for frame in frames:
+        img = Image.fromarray(frame).convert("RGB")
+        img = dynamic_preprocess(img, image_size=input_size, use_thumbnail=True, max_num=max_num)
+        pixel_values = [transform(tile) for tile in img]
+        pixel_values = torch.stack(pixel_values)
+        num_patches_list.append(pixel_values.shape[0])
+        pixel_values_list.append(pixel_values)
+        
+    pixel_values = torch.cat(pixel_values_list)
+    return pixel_values, num_patches_list
 
 def assign_device_map(model_name, manual_gpu_id=0):
     device_map = {}

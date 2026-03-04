@@ -102,12 +102,23 @@ class FrameValidatorMulti:
 
     def symbolic_verification(self, frame: VideoFrame):
         """Symbolic verification."""
+        def get_prob(p):
+                """Safely gets probability; returns 0.0 if key is missing or is a list."""
+                if not isinstance(p, str):
+                    # If the parser accidentally sends a list here, we catch it
+                    return 0.0
+                obj = frame.object_of_interest.get(p)
+                return obj.get_detected_probability() if obj else 0.0
+            
         # 1. Negative constraints: If any 'NOT' proposition is detected, frame is invalid
         not_props = self.symbolic_verification_rule.get(SymbolicFilterRule.NOT_PROPS)
         if not_props:
-            for prop in not_props:
-                if frame.object_of_interest.get(prop):
-                    if frame.object_of_interest[prop].get_detected_probability() >= self.threshold_of_probability:
+            # 'group' is the inner list like ['girl_in_black...']
+            for group in not_props:
+                for prop in group:
+                    # 'prop' is now the actual string key
+                    prob = get_prob(prop)
+                    if prob >= self.threshold_of_probability:
                         return False
 
         # 2. Disjunctive constraints (OR): If an OR group is present, at least one must be true
@@ -126,17 +137,14 @@ class FrameValidatorMulti:
         if or_props:
             or_satisfied = False
             for group in or_props:
-                print(f"DEBUG: Checking OR group: {group}")
                 for prop in group:
                     if frame.object_of_interest.get(prop):
-                        obj = frame.object_of_interest.get(prop)
-                        if frame.object_of_interest[prop].get_detected_probability() >= self.threshold_of_probability:
-                            print(f"DEBUG: Prop {prop} passed validation with prob {obj.get_detected_probability()}")
+                        prob = get_prob(prop)
+                        if prob >= self.threshold_of_probability:
                             or_satisfied = True
                             break
                 if or_satisfied: break
             if not or_satisfied:
-                print("DEBUG: OR group failed")
                 return False
         # 3. Conjunctive constraints (AND): Uses a majority voting logic as per the original code
         and_props = self.symbolic_verification_rule.get(SymbolicFilterRule.AND_PROPS)
@@ -145,10 +153,8 @@ class FrameValidatorMulti:
                 bad = 0
                 total = len(group)
                 for prop in group:
-                    prob = 0
-                    if frame.object_of_interest.get(prop):
-                        prob = frame.object_of_interest[prop].get_detected_probability()
-                    if prob < self.threshold_of_probability:
+                    prob = get_prob(prop)
+                    if prob >= self.threshold_of_probability:
                         bad += 1
                 # If more than half the propositions in the AND group are detected, we keep the frame
                 if total > 2 * bad:
@@ -157,8 +163,6 @@ class FrameValidatorMulti:
         # 4. Final check for simple positive propositions
         # has_positive_props = bool(and_props or or_props)
         has_rules = bool((not_props and len(not_props[0]) > 0) or or_props or and_props)
-        print(f'NOT Props: {not_props}, OR Props {or_props}, AND Props {and_props}')
-        print(f'[DEBUG] Final Verification check, NOT, OR, AND fail early checks passed. Final check: {has_rules}')
         return has_rules
 
     def get_symbolic_rule_from_ltl_formula(self, ltl_formula: str) -> dict:

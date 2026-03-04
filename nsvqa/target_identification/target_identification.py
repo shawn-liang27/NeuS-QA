@@ -6,9 +6,9 @@ TARGET_GROUNDING_SYSTEM = """
 You are a Video Temporal Grounding Agent. Your task is to expand an identified temporal window to capture the visual evidence required to answer a specific question.
 
 ### BUFFER RULES:
-  - "after": Use [start_time, end_time + 10]
-  - "before": Use [start_time - 10, end_time]
-  - "during": Use [start_time - 5, end_time + 5]
+  - "after": Use [start_time, end_time + 5]
+  - "before": Use [start_time - 5, end_time]
+  - "during": Use [start_time - 3, end_time + 3]
   * Note: All target windows MUST fully contain the original [start_time, end_time].
 
 ### QUESTION FORMATTING:
@@ -29,8 +29,8 @@ Candidates:
 
 Output:
 {
-  "target_frame_window": "[start_time, end_time + 10]",
-  "explanation": "Since the question asks for events 'after' the specification, I included the original window and added a 10s buffer to capture the subsequent action."
+  "target_frame_window": "[start_time, end_time + 5]",
+  "explanation": "Since the question asks for events 'after' the specification, I included the original window and added a 5s buffer to capture the subsequent action."
 }
 
 ### OUTPUT:

@@ -18,8 +18,8 @@ import sys
 
 PRINT_ALL = False
 
-BRIDGE_MULT =  10 # seconds
-CONTEXT_SECONDS = 10 # Look for P/Q within 10 seconds of a handover
+BRIDGE_MULT =  3 # seconds
+CONTEXT_SECONDS = 3 # Look for P/Q within 10 seconds of a handover
 
 warnings.filterwarnings("ignore")
 
@@ -232,7 +232,7 @@ def run_nsvs(
     )
 
     if not foi or foi == [-1]:
-        MAX_GAPS_CLIP = 3 * 60 * video_data['video_info']['fps']
+        MAX_GAPS_CLIP = 15 * video_data['video_info']['fps']
         
         # Get either AI hits or CLIP indices
         source_indices = sorted(list(set().union(*all_detections)))
