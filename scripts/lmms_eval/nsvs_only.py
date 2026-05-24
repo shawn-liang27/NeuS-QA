@@ -9,6 +9,7 @@ from nsvqa.puls.puls import *
 from nsvqa.vqa.vqa import vqa
 from nsvqa.vqa.lmm_vqa import lmm_eval_vqa
 from nsvqa.nsvs.vlm.internvl import InternVL
+from nsvqa.nsvs.vlm.vllm_client import VLLMClient
 from sentence_transformers import SentenceTransformer
 import json
 import os
@@ -113,8 +114,8 @@ def run_nsvqa(output_dir, llm_convo_dir, current_split, total_splits, vlm_config
     metrics_output = []
     starting = (len(data) * (current_split-1)) // total_splits
     ending = (len(data) * current_split) // total_splits
-
-    vlm = InternVL(model_name=vlm_config[1], device=vlm_config[0], max_patch=1)
+    # vlm = InternVL(model_name=vlm_config[1], device=vlm_config[0], max_patch=1)
+    vlm = VLLMClient(model=vlm_config[1], api_base=f"http://localhost:{vlm_config[0]}/v1")
     print("Loading CLIP model to GPU...")
     clip_model = SentenceTransformer('clip-ViT-B-32', device=f'cuda:{vlm_config[0]}')
     clip_model.eval()

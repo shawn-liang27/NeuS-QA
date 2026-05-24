@@ -16,6 +16,7 @@ lmms-eval/
 # C extensions
 *.so
 
+literatures/
 # Distribution / packaging
 .Python
 build/
