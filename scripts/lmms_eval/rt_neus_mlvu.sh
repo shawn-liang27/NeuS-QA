@@ -1,24 +1,25 @@
 #!/bin/bash
 set -euo pipefail
 
-JOB_DIR="$HOME/NeuS-VLM/NeuS-QA"
+JOB_DIR="$HOME/NeuS/NeuS-QA"
 JOB_ID=$(date +%Y%m%d_%H%M%S)
 
 export HF_HOME="$HOME/.cache/huggingface"
 export DECORD_EOF_RETRY_MAX=40960
 
 # Variables
-TOTAL_SPLITS=8  # Set this to your number of GPUs
+TOTAL_SPLITS=6  # Set this to your number of GPUs
 GPU_START=$1
+RUN_NUMBER=$2
 BENCHMARK=mlvu
 export CUDA_VISIBLE_DEVICE=0,1,2,3,4,5,6,7
-DATA_DIR="/usr/homes/sgl57/.data/mlvu/MLVU"
-BURNED_DIR="/usr/homes/sgl57/.data/mlvu/MLVU"
+DATA_DIR="/mnt/data0/sgl57/data/mlvu/MLVU"
+BURNED_DIR="/mnt/data0/sgl57/data/mlvu/MLVU"
 MODEL="InternVL2-8B"
 
 CATEGORIES=("2_needle" "3_ego")
 CAT_STR=$(IFS='_'; echo "${CATEGORIES[*]}")
-OUT_DIR="$JOB_DIR/experiment_results/nsvs_improved/mlvu/mlvu_${JOB_ID}"
+OUT_DIR="$JOB_DIR/experiment_results/rt-neus/mlvu/mlvu_${RUN_NUMBER}"
 
 mkdir -p "$OUT_DIR"
 

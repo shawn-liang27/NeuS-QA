@@ -7,20 +7,20 @@ CURRENT_SPLIT=$1
 GPU=$2
 BENCHMARK=mlvu
 
-JOB_DIR="$HOME/NeuS-VLM/NeuS-QA"
+JOB_DIR="$HOME/NeuS/NeuS-QA"
 JOB_ID=$(date +%Y%m%d_%H%M%S)
 
 export HF_HOME="$HOME/.cache/huggingface"
 
 # Variables
 # DATA_DIR="/usr/homes/sgl57/.data/LongVideoBench"
-DATA_DIR="/usr/homes/sgl57/.data/mlvu/MLVU"
-BURNED_DIR="/usr/homes/sgl57/.data/mlvu/MLVU"
+DATA_DIR="/mnt/data0/sgl57/data/mlvu/MLVU"
+BURNED_DIR="/mnt/data0/sgl57/data/mlvu/MLVU"
 MODEL="InternVL2-8B"
 
 CATEGORIES=("2_needle" "3_ego")
 CAT_STR=$(IFS='_'; echo "${CATEGORIES[*]}")
-OUT_DIR="$JOB_DIR/experiment_results/nsvs_improved/mlvu/mlvu_split${CURRENT_SPLIT}_${JOB_ID}"
+OUT_DIR="$JOB_DIR/experiment_results/rt-neus/mlvu/mlvu_${JOB_ID}"
 
 mkdir -p "$OUT_DIR"
 

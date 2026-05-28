@@ -19,6 +19,10 @@ export CPATH="$INSTALL_PREFIX/include:${CPATH:-}"
 export LIBRARY_PATH="$INSTALL_PREFIX/lib:$INSTALL_PREFIX/lib64:${LIBRARY_PATH:-}"
 export LD_LIBRARY_PATH="$INSTALL_PREFIX/lib:$INSTALL_PREFIX/lib64:${LD_LIBRARY_PATH:-}"
 
+# Global Fix: Inject modern compiler flags to prevent warnings from halting the build
+# and force C++20 globally across Autotools/CMake downstreams to recognize std::span
+export CXXFLAGS="${CXXFLAGS:-} -std=c++20 -Wno-free-nonheap-object -Wno-error=free-nonheap-object"
+
 mkdir -p "$VENDORS_DIR"
 mkdir -p "$INSTALL_PREFIX"
 cd "$VENDORS_DIR"
@@ -132,6 +136,8 @@ if [ ! -d "carl-storm" ]; then
 fi
 cmake -S carl-storm -B carl-storm/build \
   -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_CXX_STANDARD=20 \
+  -DCMAKE_CXX_STANDARD_REQUIRED=ON \
   -DCMAKE_INSTALL_PREFIX="$INSTALL_PREFIX" \
   -DGMP_DIR="$INSTALL_PREFIX" \
   -DUSE_CLN=OFF \
@@ -146,8 +152,23 @@ echo ">>> Building storm-stable..."
 if [ ! -d "storm-stable" ]; then
   git clone --branch stable --depth 1 --recursive https://github.com/moves-rwth/storm.git storm-stable
 fi
+
+# Apply the template definition patch inside the fresh download before compilation runs
+# This stops the 'incomplete type StandardRewardModel' bug natively
+PARTITION_FILE="storm-stable/src/storm/storage/dd/bisimulation/Partition.cpp"
+CHECKER_FILE="storm-stable/src/storm/modelchecker/AbstractModelChecker.cpp"
+READER_FILE="storm-stable/src/storm/io/ArchiveReader.cpp"
+
+for file in "$PARTITION_FILE" "$CHECKER_FILE" "$READER_FILE"; do
+  if [ -f "$file" ] && ! grep -q "StandardRewardModel.h" "$file"; then
+    sed -i '/#include/a #include "storm/models/symbolic/StandardRewardModel.h"' "$file"
+  fi
+done
+
 cmake -S storm-stable -B storm-stable/build \
   -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_CXX_STANDARD=20 \
+  -DCMAKE_CXX_STANDARD_REQUIRED=ON \
   -DCMAKE_INSTALL_PREFIX="$INSTALL_PREFIX" \
   -DCMAKE_PREFIX_PATH="$INSTALL_PREFIX" \
   -DSTORM_DEVELOPER=OFF \

@@ -6,20 +6,13 @@ from pathlib import Path
 
 
 def main(args):
-    data_dir = "/mnt/data0/sgl57/data/mlvu/MLVU"
+    data_dir = "/mnt/data0/sgl57/data/Video-MME/data"
     if args.task_type == "original":
         new_original_entries = []
-        with open("/mnt/data0/sgl57/data/mlvu/MLVU/dataset.json", "r") as f:
+        with open("/mnt/data0/sgl57/data/Video-MME/dataset.json", "r") as f:
             dataset_json = json.load(f)
             for original_entry in dataset_json:
-                entry = {}
-                entry["video"] = original_entry["metadata"]["video_id"]
-                entry["video_path"] = original_entry["paths"]["video_path"]
-                entry["duration"] = original_entry["metadata"]["duration"]
-                entry["question"] = original_entry["question"]
-                entry["candidates"] = original_entry["candidates"]
-                entry["answer"] = original_entry["correct_choice"]
-                entry["question_type"] = original_entry["metadata"]["question_type"]
+                entry = original_entry.copy()
                 entry['frames_of_interest'] = [[-1]]
                 new_original_entries.append(entry)
             
@@ -31,7 +24,7 @@ def main(args):
         return
     
     nsvs_path = args.nsvs_path
-    logging_path = f'/usr/homes/sgl57/NeuS-VLM/NeuS-QA/experiment_results/lmm_eval/mlvu/{args.task_type}/experiment_{args.experiment_number}'
+    logging_path = f'/usr/homes/sgl57/NeuS/NeuS-QA/experiment_results/lmms_eval/video_mme/{args.task_type}/experiment_{args.experiment_number}'
     lmms_path = os.path.join(logging_path, "lmms")
     nsvqa_path_list = [os.path.join(nsvs_path, f'split_{i}', 'nsvqa_output') for i in range(1, args.num_split + 1)]
     os.makedirs(lmms_path, exist_ok=True)
@@ -64,13 +57,17 @@ def main(args):
     output_data = []
     for postprocess_entry in postprocess_data:
         entry = {}
-        entry["video"] = postprocess_entry["metadata"]["video_id"]
+        entry["videoID"] = postprocess_entry["metadata"]["video_id"]
+        entry["question_id"] = postprocess_entry["metadata"]["question_id"]
         entry["video_path"] = postprocess_entry["paths"]["video_path"]
-        entry["duration"] = postprocess_entry["metadata"]["duration"]
+        entry["duration"] = postprocess_entry["metadata"]["duration_group"]
         entry["question"] = postprocess_entry["question"]
         entry["candidates"] = postprocess_entry["candidates"]
         entry["answer"] = postprocess_entry["correct_choice"]
-        entry["question_type"] = postprocess_entry["metadata"]["question_type"]
+        entry["domain"] = postprocess_entry["metadata"]["domain"]
+        entry["options"] = postprocess_entry["candidates"]
+        entry["sub_category"] = postprocess_entry["metadata"]["sub_category"]
+        entry["task_type"] = postprocess_entry["metadata"]["task_type"]
         frames_of_interest = postprocess_entry["frames_of_interest"]
 
         if frames_of_interest == [-1]:

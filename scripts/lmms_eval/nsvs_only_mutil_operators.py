@@ -6,7 +6,8 @@ from nsvqa.nsvs.video.read_video import *
 from nsvqa.nsvs.nsvs_multi import *
 from nsvqa.puls_multi_operators.puls import *
 from nsvqa.nsvs.video.read_video_adaptive import read_video_adaptive
-from nsvqa.nsvs.vlm.internvl import InternVL
+# from nsvqa.nsvs.vlm.internvl import InternVL
+from nsvqa.nsvs.vlm.internvl_precompute import InternVL
 from sentence_transformers import SentenceTransformer
 
 import json

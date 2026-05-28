@@ -41,11 +41,13 @@ class VideoMME(Manager):
                 video_id = item['videoID']
                 video_filename = f"{video_id}.mp4"
                 question_id = item["question_id"]
-                
+                if video_filename == "IKtnfFHjERg.mp4":
+                    continue
                 # Check for subtitle file (.srt is standard for Video-MME)
                 subtitle_file = os.path.join(subtitle_root, f"{video_id}.srt")
                 subtitle_path = subtitle_file if os.path.exists(subtitle_file) else None
                 item["video_path"] = os.path.join(self._burned_path, duration_group, video_filename)
+                
                 entry = {
                     "question": item["question"],
                     "candidates": item["options"],

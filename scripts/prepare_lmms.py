@@ -7,9 +7,9 @@ from pathlib import Path
 NO_ORIGINAL=True
 
 def main(args):
-    longvideobench_path = "/usr/homes/sgl57/.data/LongVideoBench/lvb_val.json"
+    longvideobench_path = "/mnt/data0/sgl57/data/LongVideoBench/lvb_val.json"
     nsvs_path = args.nsvs_path
-    logging_path = f'/usr/homes/sgl57/NeuS-VLM/NeuS-QA/experiment_results/lmm_eval/longvideobench/{args.task_type}/experiment_{args.experiment_number}'
+    logging_path = f'/usr/homes/sgl57/NeuS/NeuS-QA/experiment_results/lmms_eval/longvideobench/{args.task_type}/experiment_{args.experiment_number}'
     lmms_path = os.path.join(logging_path, "lmms")
     postprocess_path_list = steps = [os.path.join(nsvs_path, f'split_{i}', 'postprocess_output') for i in range(1, args.num_split + 1)]
     print(postprocess_path_list)
@@ -81,7 +81,7 @@ def main(args):
 
     if not NO_ORIGINAL:
         # original videos
-        burn_subtitles_path = "/usr/homes/sgl57/.data/LongVideoBench/burn-subtitles/T3E_E3E_T3O_O3O_mix_2026_01_14_21_55"
+        burn_subtitles_path = "/mnt/data0/sgl57/data/LongVideoBench/burn-subtitles/T3E_E3E_T3O_O3O_mix_2026_01_14_21_55"
         original_output_videos_path = os.path.join(original_output_path, "videos")
         os.makedirs(original_output_videos_path, exist_ok=True)
 

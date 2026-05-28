@@ -77,6 +77,19 @@ def intersection_with_gaps(indices, max_gaps=8):
     return sorted(largest_set)
 
 
+def densify(indices, max_gaps):
+    """Expand sparse indices into continuous ranges by filling gaps within clusters.
+    e.g. {100, 103, 106} with max_gaps=5 → {100, 101, 102, 103, 104, 105, 106}
+    """
+    if not indices:
+        return set()
+    groups = group_with_gaps(sorted(indices), max_gaps=max_gaps)
+    dense = set()
+    for g in groups:
+        dense.update(range(min(g), max(g) + 1))
+    return dense
+
+
 def find_soft_handover(p_indices, q_indices, tolerance_frames):
     """
     Finds frames from both sets that are within 'tolerance_frames' of each other.
@@ -122,22 +135,38 @@ def reconcile_sparse_ltl(video_info, p_indices, q_indices, automaton_foi, target
             handover_sorted = sorted(list(handover_all))
             handover_clusters = group_with_gaps(handover_sorted, max_gaps=MAX_GAPS)
             valid_segments = set()
-            
+
             for cluster in handover_clusters:
                 t_start = min(cluster)
                 t_end = max(cluster)
-                
+
                 event_p = {idx for idx in p_indices if (t_start - WINDOW) <= idx <= t_end}
                 event_q = {idx for idx in q_indices if t_start <= idx <= (t_end + WINDOW)}
-                
+
                 valid_segments.update(event_p)
                 valid_segments.update(event_q)
 
-            final_set = valid_segments | set(automaton_foi)
+            # Intersection preserves formal guarantees from the automaton
+            # Densify both sets so sparse samples intersect at the range level
+            if automaton_foi:
+                dense_automaton = densify(automaton_foi, max_gaps=MAX_GAPS)
+                dense_segments = densify(valid_segments, max_gaps=MAX_GAPS)
+                final_set = dense_segments & dense_automaton
+                if not final_set:
+                    final_set = dense_automaton
+            else:
+                final_set = valid_segments
         else:
             final_set = set(automaton_foi)
     else:
-        final_set = p_indices | set(automaton_foi)
+        if automaton_foi:
+            dense_automaton = densify(automaton_foi, max_gaps=MAX_GAPS)
+            dense_props = densify(p_indices, max_gaps=MAX_GAPS)
+            final_set = dense_props & dense_automaton
+            if not final_set:
+                final_set = dense_automaton
+        else:
+            final_set = p_indices
     if not final_set:
         return [-1]
 
@@ -208,6 +237,19 @@ def reconcile_dynamic_ltl(video_info, all_detections, automaton_foi, target_wind
 
     # Union the segments identified by handovers with the automaton's path
     final_set.update(valid_segments)
+
+    #     # Intersection preserves formal guarantees from the automaton
+    # # Densify so sparse samples intersect at the range level
+    # if final_set and valid_segments:
+    #     dense_automaton = densify(final_set, max_gaps=MAX_GAPS)
+    #     dense_segments = densify(valid_segments, max_gaps=MAX_GAPS)
+    #     final_set = dense_segments & dense_automaton
+    #     if not final_set:
+    #         final_set = dense_automaton
+    # elif not final_set:
+    #     final_set = valid_segments
+
+    # # Fallback: If still empty, use proposition detections only
 
     # Fallback: If no sequential handovers were found, take the union of all hits
     if not final_set:

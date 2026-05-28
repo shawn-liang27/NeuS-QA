@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-JOB_DIR="$HOME/NeuS-VLM/NeuS-QA"
+JOB_DIR="$HOME/NeuS/NeuS-QA"
 JOB_ID=$(date +%Y%m%d_%H%M%S)
 
 export HF_HOME="$HOME/.cache/huggingface"
@@ -13,16 +13,17 @@ RUN_NUMBER=$2
 export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 
 # Variables
-DATA_DIR="/usr/homes/sgl57/.data/LongVideoBench"
-# BURNED_DIR="/usr/homes/sgl57/.data/LongVideoBench/burn-subtitles/T3E_E3E_T3O_O3O_mix"
-BURNED_DIR="/usr/homes/sgl57/.data/LongVideoBench/burn-subtitles/T3E_E3E_T3O_O3O_mix_2026_01_14_21_55"
+DATA_DIR="/mnt/data0/sgl57/data/LongVideoBench"
+# BURNED_DIR="/mnt/data0/sgl57/data/LongVideoBench/burn-subtitles/T3E_E3E_T3O_O3O_mix"
+BURNED_DIR="/mnt/data0/sgl57/data/LongVideoBench/burn-subtitles/T3E_E3E_T3O_O3O_mix_2026_01_14_21_55"
 MODEL="InternVL2-8B"
+# MODEL="OpenGVLab/InternVL2-8B"
 MAX_TOKEN_LEN=65000
 
 CATEGORIES=("T3E" "E3E" "T3O" "O3O") # "T3E", "E3E", "T3O", "O3O"
 CAT_STR=$(IFS='_'; echo "${CATEGORIES[*]}")
 
-OUT_DIR="$JOB_DIR/experiment_results/nsvs_improved/"${MODEL//\//_}"/rt-neus/experiment_${RUN_NUMBER}"
+OUT_DIR="$JOB_DIR/experiment_results/rt-neus/lvb/experiment_${RUN_NUMBER}"
 
 mkdir -p "$OUT_DIR"
 
